@@ -89,6 +89,10 @@ export async function modelStep(
     config.demo === "amazon" ? amazonBrowserSystem : browserSystem;
   const defaultTools =
     config.demo === "amazon" ? amazonBrowserTools : marketplaceBrowserTools;
+  const privateAmazonBrief =
+    config.demo === "amazon" && config.amazonBrief.trim()
+      ? `\n\nPRIVATE SESSION BRIEF\n${config.amazonBrief.trim()}\nTreat this as private runtime context. Never quote, display, or mention the delivery address in tool summaries or the final answer.`
+      : "";
   const response = await fetch(`${config.baseURL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -97,7 +101,7 @@ export async function modelStep(
     },
     body: JSON.stringify({
       model: config.model,
-      messages: [{ role: 'system', content: options.system || defaultSystem }, ...messages],
+      messages: [{ role: 'system', content: `${options.system || defaultSystem}${privateAmazonBrief}` }, ...messages],
       tools: options.tools || (finishOnly
         ? defaultTools.filter((tool) => tool.function.name === 'finish')
         : defaultTools),

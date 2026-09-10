@@ -33,12 +33,15 @@ export function configuration() {
       ? file.FIREWORKS_BASE_URL || process.env.FIREWORKS_BASE_URL || 'https://api.fireworks.ai/inference/v1'
       : file.CEREBRAS_BASE_URL || process.env.CEREBRAS_BASE_URL || 'https://api.cerebras.ai/v1'
   ).replace(/\/$/, '');
+  const amazonBrief =
+    process.env.AMAZON_EPHEMERAL_BRIEF || file.AMAZON_EPHEMERAL_BRIEF || '';
   return {
     key,
     model,
     baseURL,
     provider,
     demo,
+    amazonBrief,
     mode: key && model ? provider : ('local' as const),
     incomplete: Boolean(key) !== Boolean(model),
   };
