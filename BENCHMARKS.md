@@ -91,3 +91,8 @@ Known-query preparation used four operator-selected official pages: True Food Ki
 - Recorded take: 1.341 s preparation, 4.975 s request, 3 calls. The model additionally opened four live pages after submission, including three menu-category pages concurrently. Those navigation spans were about 0.52–0.81 s. The final answer identified a provisional candidate and explicitly left ingredient confirmation unresolved.
 
 The silent 12.64-second recording is `artifacts/recordings/restaurant-live.mp4`, at normal speed. It was fully decoded and visually inspected, including a frame showing three simultaneous orange loading tabs. SHA-256: `da49d7b26a0584f8885c0a981cb6c34da1225894fa981953f6c6e7ea5731ff03`. Trace and provenance are beside the video and excluded from Git.
+
+
+## No-preload Maps trials
+
+Starting on Google with no prepared query results or restaurant pages, live Maps discovery returned restaurants without a CAPTCHA. It opened place pages and official menus in parallel, but did not finish the ingredient comparison. The initial trial timed out at 45.002 s with 32 model calls. After preserving complete page evidence during conversation compaction and waiting for Maps details to render, a second trial still timed out at 45.016 s with 19 calls. This is not a successful end-to-end benchmark. The full normal-speed second recording is `artifacts/recordings/maps-live-v2.mp4` (52.68 s); its trace and provenance are stored beside it. Browser processes were warm, but no search results or restaurant pages were preloaded.

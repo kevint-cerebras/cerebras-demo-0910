@@ -42,7 +42,7 @@ try {
   const result=events.find(e=>e.type==='result')?.result;
   assert.equal(result.status,'done');
   assert(events.some(e=>e.label==='parallel_browse'));
-  assert(events.filter(e=>e.type==='browser-action' && e.label?.startsWith('Reading preloaded page:')).length>=3,'The submitted task must reuse cached pages');
+  assert(events.filter(e=>e.type==='browser-action' && e.label?.startsWith('Reading already-open page:')).length>=3,'The submitted task must reuse cached pages');
   assert(await page.evaluate(()=>(window as any).maxReading>=3));
   await page.locator('.answer-text').waitFor();
   assert(await page.locator('.answer-text a').count()>=2,'Answer should link menu and location evidence');

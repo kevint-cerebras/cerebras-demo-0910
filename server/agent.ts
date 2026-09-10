@@ -252,12 +252,15 @@ async function inspectRemotePages(urls: string[], report: (page: Page, label: st
     signal?.addEventListener("abort",cancelled,{once:true});
     try {
       tabWork.set(page,reused?"reading":"loading");
-      await report(page,reused?"Reading preloaded page":"Opening page",0,"coordination");
+      await report(page,reused?"Reading already-open page":"Opening page",0,"coordination");
       let navigation=0;
       if(!reused){
         const start=performance.now();await page.goto(url,{waitUntil:"domcontentloaded",timeout:12000});navigation=performance.now()-start;
         await page.locator("body").waitFor({state:"attached",timeout:3000});
         await report(page,"Page loaded",navigation,"navigation");
+      }
+      if(new URL(page.url()).hostname.endsWith("google.com") && new URL(page.url()).pathname.startsWith("/maps/")) {
+        await page.waitForFunction(()=>Boolean(document.querySelector('[role="feed"] a[href*="/maps/place/"]')) || Boolean(document.querySelector('h1')?.textContent?.trim() && /Website|Directions|Address/i.test(document.body.innerText)) || /unusual traffic|Before you continue/i.test(document.body.innerText), {}, {timeout:5000}).catch(()=>{});
       }
       signal?.throwIfAborted();tabWork.set(page,"reading");
       const start=performance.now();const observation=await page.evaluate(readPageScript) as {url:string;title:string;text:string;elements:unknown[]};
@@ -742,9 +745,13 @@ export async function executeGeneral(
           messages[i].role === "tool" &&
           (messages[i].content?.length ?? 0) > 2400
         )
-          messages[i].content =
-            messages[i].content!.slice(0, 2400) +
-            " [Earlier page observation shortened]";
+          try {
+            messages[i].content = JSON.stringify(JSON.parse(messages[i].content!, (key,value)=>{
+              if(key === "elements" && Array.isArray(value)) return value.filter(item=>item.href && item.href.length<1000).map(item=>({label:item.label,href:item.href})).slice(0,30);
+              if(key === "snapshotId") return undefined;
+              return value;
+            }));
+          } catch { /* Keep non-JSON tool responses intact. */ }
     }
     send("done", {
       summary,
