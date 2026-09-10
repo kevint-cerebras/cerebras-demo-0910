@@ -1273,6 +1273,7 @@ export async function executeGeneral(
                         label,
                         config.demo,
                         config.amazonPurchaseAuthorized,
+                        page!.url(),
                       );
                     if (consequentialLabel.test(label) && !authorizedAmazonPurchase)
                       throw new Error(

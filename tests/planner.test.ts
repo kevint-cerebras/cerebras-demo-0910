@@ -101,6 +101,33 @@ test("real order controls require an explicitly authorized Amazon session", () =
     authorizedAmazonPurchaseAction("Buy Now", "amazon", true),
     false,
   );
+  assert.equal(
+    authorizedAmazonPurchaseAction(
+      "Delete",
+      "amazon",
+      true,
+      "https://www.amazon.com/gp/cart/view.html",
+    ),
+    true,
+  );
+  assert.equal(
+    authorizedAmazonPurchaseAction(
+      "Delete account",
+      "amazon",
+      true,
+      "https://www.amazon.com/your-account",
+    ),
+    false,
+  );
+  assert.equal(
+    authorizedAmazonPurchaseAction(
+      "Remove",
+      "marketplace",
+      true,
+      "https://www.amazon.com/gp/cart/view.html",
+    ),
+    false,
+  );
 });
 
 test("Amazon payment authorization is not mistaken for order confirmation", () => {

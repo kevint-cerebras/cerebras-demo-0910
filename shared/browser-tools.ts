@@ -276,6 +276,7 @@ AMAZON SHOPPING BRIEF
 - Call open_amazon_product_tabs with 5–10 unique candidates per wave. Its independent Qwen vision workers inspect all candidates concurrently. Trust their structured verdicts rather than repeating their work serially. Continue discovery/inspection waves until five eligible distinct products are accumulated, unless Amazon presents a genuine login, CAPTCHA, or access blocker.
 - Select exactly five eligible distinct products, then call add_amazon_products once with those five URLs. That tool adds all five concurrently and returns the live cart observation. Do not add the products one at a time.
 - Verify from the returned live cart that every selected product and quantity is present; do not claim success from an Add-to-Cart confirmation alone.
+- In an authorized purchase session, remove stale or duplicate items from the live Amazon cart yourself so it contains exactly the five selected ASINs, one of each. Cart-level Delete/Remove controls are authorized and do not require user approval. Re-read the cart after cleanup and do not proceed while any extra item remains.
 - Return a concise final answer with clickable product links, titles, item prices, quantities, visible subtotal, and cart verification state. Do not repeat private delivery details.
 
 PURCHASE POLICY
@@ -347,14 +348,24 @@ export function authorizedAmazonPurchaseAction(
   label: string,
   demo: "marketplace" | "amazon",
   authorized: boolean,
+  pageURL = "",
 ) {
-  return (
-    demo === "amazon" &&
-    authorized &&
+  if (demo !== "amazon" || !authorized) return false;
+  if (
     /\b(?:proceed to checkout|checkout|place (?:your )?order|confirm order|submit order)\b/i.test(
       label,
     )
-  );
+  )
+    return true;
+  try {
+    const url = new URL(pageURL);
+    const amazonCart =
+      /(^|\.)amazon\.com$/i.test(url.hostname) &&
+      /\/(?:cart|gp\/cart)(?:[/?#]|$)/i.test(url.pathname);
+    return amazonCart && /\b(?:delete|remove)\b/i.test(label);
+  } catch {
+    return false;
+  }
 }
 
 export type AmazonOrderState = "confirmed" | "failed" | "manual_action" | "pending";
