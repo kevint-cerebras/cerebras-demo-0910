@@ -1,6 +1,6 @@
-# Dash Marketplace Vision Demo
+# Dash Marketplace and Amazon Demos
 
-A local React + Playwright browser-agent demo for read-only Facebook Marketplace research. The live browser occupies 75% of the workspace and the Dash chat occupies 25%.
+A local React + Playwright browser-agent harness with separate Facebook Marketplace research and Amazon cart-preparation modes. The live browser occupies 75% of the workspace and the Dash chat occupies 25%.
 
 The hidden Marketplace brief asks the model to inspect every photo for plausible goose-statue listings, verify a pixel-visible open beak, verify shipping to Sunnyvale, CA 94085, and stop immediately after two qualified listings. The visible composer is intentionally blank and accepts the presenter’s natural-language request.
 
@@ -25,6 +25,28 @@ npm run marketplace:cerebras
 
 ```bash
 npm run marketplace:fireworks
+```
+
+## Amazon party-favor demo
+
+The Amazon mode uses a separate ignored persistent profile at `.browser-profile/amazon`, so Amazon and Facebook sessions do not mix. It is optimized for a request where 12 children should each receive three distinct favors costing less than $5 per individual favor. Dash searches, adds sufficient quantities to the Amazon cart, verifies the live cart, and returns product links and quantity math. Checkout, ordering, credentials, addresses, and payment are blocked in code and instructions.
+
+Launch with Cerebras:
+
+```bash
+npm run amazon:cerebras
+```
+
+Launch with Fireworks:
+
+```bash
+npm run amazon:fireworks
+```
+
+Suggested prompt:
+
+```text
+I'm shopping for my niece's birthday party. I need three party favors each for 12 girls under five years old. Each item must cost less than $5. Build and verify the Amazon cart, but do not place an order.
 ```
 
 The launcher opens the Dash controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive browser preview or pop-out target browser to log into Facebook if needed. The target browser does not initiate a run by itself: type the request in the Dash controller and press **Run**. Do not run both provider commands at once; both use port 3100 and the same persistent browser profile.

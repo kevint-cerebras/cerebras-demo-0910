@@ -13,7 +13,13 @@ export function configuration() {
   ).toLowerCase();
   if (!['cerebras', 'fireworks'].includes(requestedProvider))
     throw new Error('INFERENCE_PROVIDER must be cerebras or fireworks.');
+  const requestedDemo = (
+    process.env.DEMO_MODE || file.DEMO_MODE || "marketplace"
+  ).toLowerCase();
+  if (!["marketplace", "amazon"].includes(requestedDemo))
+    throw new Error("DEMO_MODE must be marketplace or amazon.");
   const provider = requestedProvider as 'cerebras' | 'fireworks';
+  const demo = requestedDemo as "marketplace" | "amazon";
   const key =
     provider === 'fireworks'
       ? file.FIREWORKS_API_KEY || process.env.FIREWORKS_API_KEY || ''
@@ -32,6 +38,7 @@ export function configuration() {
     model,
     baseURL,
     provider,
+    demo,
     mode: key && model ? provider : ('local' as const),
     incomplete: Boolean(key) !== Boolean(model),
   };

@@ -12,6 +12,8 @@ import {
   type Route,
 } from "playwright";
 import {
+  amazonBrowserSystem,
+  amazonBrowserTools,
   browserSystem,
   consequentialLabel,
   marketplaceBrowserTools,
@@ -83,6 +85,10 @@ export async function modelStep(
     providerTotal: null,
     reasoningTokens: null,
   };
+  const defaultSystem =
+    config.demo === "amazon" ? amazonBrowserSystem : browserSystem;
+  const defaultTools =
+    config.demo === "amazon" ? amazonBrowserTools : marketplaceBrowserTools;
   const response = await fetch(`${config.baseURL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -91,10 +97,10 @@ export async function modelStep(
     },
     body: JSON.stringify({
       model: config.model,
-      messages: [{ role: 'system', content: options.system || browserSystem }, ...messages],
+      messages: [{ role: 'system', content: options.system || defaultSystem }, ...messages],
       tools: options.tools || (finishOnly
-        ? marketplaceBrowserTools.filter((tool) => tool.function.name === 'finish')
-        : marketplaceBrowserTools),
+        ? defaultTools.filter((tool) => tool.function.name === 'finish')
+        : defaultTools),
       tool_choice: "required",
       // Marketplace photo decisions need the screenshot produced after each action.
       parallel_tool_calls: false,
@@ -477,7 +483,12 @@ export async function warmGeneral() {
     return generalPage;
   }
   warming = (async () => {
-    mkdirSync(".browser-profile/marketplace", { recursive: true });
+    const demo = configuration().demo;
+    const profileDirectory = `.browser-profile/${demo}`;
+    const startURL = demo === "amazon"
+      ? "https://www.amazon.com/"
+      : "https://www.facebook.com/marketplace/";
+    mkdirSync(profileDirectory, { recursive: true });
     const headless = process.env.BROWSER_HEADLESS !== "false";
     const installedChromium = join(
       homedir(),
@@ -489,7 +500,7 @@ export async function warmGeneral() {
       process.env.BROWSER_EXECUTABLE_PATH ||
       (existsSync(installedChromium) ? installedChromium : undefined);
     const context = await chromium.launchPersistentContext(
-      ".browser-profile/marketplace",
+      profileDirectory,
       {
         ...(executablePath
           ? { executablePath }
@@ -514,7 +525,7 @@ export async function warmGeneral() {
       p.setDefaultTimeout(4000);
     });
     generalPage.setDefaultTimeout(4000);
-    await generalPage.goto("https://www.facebook.com/marketplace/", {
+    await generalPage.goto(startURL, {
       waitUntil: "domcontentloaded",
       timeout: 12000,
     });
@@ -831,6 +842,13 @@ export async function executeGeneral(
                     String(args.url),
                     "http://127.0.0.1:3100",
                   );
+                  const target = new URL(url);
+                  const demo = configuration().demo;
+                  if (
+                    (demo === "amazon" && !/(^|\.)amazon\.com$/i.test(target.hostname)) ||
+                    (demo === "marketplace" && !/(^|\.)facebook\.com$/i.test(target.hostname))
+                  )
+                    throw new Error(`This run is restricted to ${demo === "amazon" ? "Amazon.com" : "Facebook Marketplace"}.`);
                   await page!.goto(url, {
                     waitUntil: "domcontentloaded",
                     timeout: 12000,
@@ -919,8 +937,15 @@ export async function executeGeneral(
                     await locator.selectOption(String(args.value));
                   } else if (call.name === "fill") {
                     const type = await locator.getAttribute("type");
-                    if (type === "password")
-                      throw new Error("Password entry requires the user.");
+                    const descriptor = [
+                      label,
+                      type,
+                      await locator.getAttribute("name"),
+                      await locator.getAttribute("placeholder"),
+                      await locator.getAttribute("autocomplete"),
+                    ].join(" ");
+                    if (/password|passcode|otp|one.?time|address|street|city|zip|postal|phone|email|card|payment|cvv|cvc/i.test(descriptor))
+                      throw new Error("Credentials, address, and payment fields require the user.");
                     await locator.fill(String(args.text ?? ""));
                   } else {
                     if (
@@ -1120,7 +1145,9 @@ async function resetBrowserView() {
   tabPages.clear();tabWork.clear();openedPages.clear();
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);
-  if(!page.url().startsWith("https://www.facebook.com/marketplace")) await page.goto("https://www.facebook.com/marketplace/",{waitUntil:"domcontentloaded",timeout:12000});
+  const demo = configuration().demo;
+  const startURL = demo === "amazon" ? "https://www.amazon.com/" : "https://www.facebook.com/marketplace/";
+  if(!page.url().startsWith(startURL)) await page.goto(startURL,{waitUntil:"domcontentloaded",timeout:12000});
 }
 export async function resetGeneralBrowser() {
   if (busy) throw new Error("Wait for the current browser action to finish.");

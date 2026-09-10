@@ -3,14 +3,20 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const provider = process.argv[2];
+const demo = process.argv[3] || 'marketplace';
 if (!['cerebras', 'fireworks'].includes(provider)) {
-  console.error('Usage: node scripts/run-marketplace.mjs cerebras|fireworks');
+  console.error('Usage: node scripts/run-marketplace.mjs cerebras|fireworks [marketplace|amazon]');
+  process.exit(2);
+}
+if (!['marketplace', 'amazon'].includes(demo)) {
+  console.error('Demo must be marketplace or amazon.');
   process.exit(2);
 }
 
 const environment = {
   ...process.env,
   INFERENCE_PROVIDER: provider,
+  DEMO_MODE: demo,
   // Dash renders this browser interactively in its 75%-width preview.
   BROWSER_HEADLESS: process.env.BROWSER_HEADLESS || 'true',
 };

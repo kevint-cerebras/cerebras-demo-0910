@@ -332,7 +332,7 @@ export class ShoppingRun {
     });
     this.stage("task", "running", "Starting your request");
     this.deadline = setTimeout(
-      () => this.cancel("The run exceeded the Marketplace time limit. Verified partial results were preserved."),
+      () => this.cancel("The browser task exceeded its time limit. Verified partial results were preserved."),
       Number(process.env.TASK_TIMEOUT_MS || 180_000),
     );
     try {

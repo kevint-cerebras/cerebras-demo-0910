@@ -15,6 +15,7 @@ export interface Health {
   status: string;
   mode: "local" | "cerebras" | "fireworks";
   provider: "cerebras" | "fireworks";
+  demo: "marketplace" | "amazon";
   model: string | null;
   configurationIncomplete: boolean;
   browser: {

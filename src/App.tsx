@@ -51,6 +51,7 @@ export default function App() {
   const submitting = useRef(false);
   const composerInput = useRef<HTMLTextAreaElement>(null);
   const result = dash.result;
+  const isAmazon = dash.health?.demo === "amazon";
   const winner = result?.winner;
   const messageId = `${task.current}-assistant`;
   const toolId = `${task.current}-cart`;
@@ -364,7 +365,7 @@ export default function App() {
               <ComposerPrimitive.Input
                 ref={composerInput}
                 aria-label="Ask Dash to use the browser"
-                placeholder="What should I find on Marketplace?"
+                placeholder={isAmazon ? "What should I shop for on Amazon?" : "What should I find on Marketplace?"}
                 onChange={(e) => {
                   const text = e.target.value;
                   queueMicrotask(() => setInput(text));
@@ -497,14 +498,16 @@ export default function App() {
                     <DashMessages />
                   ) : (
                     <div className="demo-intro">
-                      <h2>What should I find?</h2>
+                      <h2>{isAmazon ? "What should I shop for?" : "What should I find?"}</h2>
                       <p>
-                        Give Dash a Marketplace research request, then watch it
-                        inspect listings and photos in the live browser.
+                        {isAmazon
+                          ? "Give Dash an Amazon shopping request, then watch it prepare and verify the cart."
+                          : "Give Dash a Marketplace research request, then watch it inspect listings and photos in the live browser."}
                       </p>
                       <p className="demo-fine">
-                        Research is read-only. You can take over the persistent
-                        Facebook browser whenever the agent is idle.
+                        {isAmazon
+                          ? "Cart preparation is allowed, but checkout and ordering are blocked. You can take over while the agent is idle."
+                          : "Research is read-only. You can take over the persistent Facebook browser whenever the agent is idle."}
                       </p>
                     </div>
                   )}
@@ -520,7 +523,7 @@ export default function App() {
             </div>
           </ThreadPrimitive.Root>
           <footer className="demo-footer">
-            <span>Facebook Marketplace · Read-only research</span>
+            <span>{isAmazon ? "Amazon · Cart preparation only" : "Facebook Marketplace · Read-only research"}</span>
           </footer>
           {details && (
             <TimingPanel

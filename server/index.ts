@@ -48,6 +48,7 @@ app.get("/api/health", (_req, res) => {
     mode: config.mode,
     model: config.mode === "local" ? null : config.model,
     provider: config.provider,
+    demo: config.demo,
     configurationIncomplete: config.incomplete,
     browser: {
       ...browserStatus(),
@@ -98,7 +99,7 @@ app.post("/api/browser/reset", async (_req, res) => {
   try {
     res.json({ page: await resetGeneralBrowser() });
   } catch (error) {
-    res.status(409).json({ error: error instanceof Error ? error.message : "Could not return to Marketplace." });
+    res.status(409).json({ error: error instanceof Error ? error.message : "Could not reset the demo browser." });
   }
 });
 const runInput = z.object({
