@@ -5,6 +5,26 @@ export const browserTools = [
   {
     type: "function",
     function: {
+      name: "discover_amazon_products",
+      description:
+        "Search 2–8 Amazon merchandise categories concurrently and return unique canonical product links deduplicated by ASIN. Use this before product inspection. If fewer than five usable unique products are returned, immediately call it again with broader category queries instead of finishing.",
+      parameters: {
+        type: "object",
+        properties: {
+          queries: {
+            type: "array",
+            minItems: 2,
+            maxItems: 8,
+            items: { type: "string" },
+          },
+        },
+        required: ["queries"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "open_amazon_product_tabs",
       description:
         "Open and inspect 5–10 observed Amazon product URLs concurrently. Each tab gets an independent one-shot vision worker that checks product match, price, availability, and delivery evidence. Returns structured verdicts. Use once after collecting candidate product links.",
@@ -220,6 +240,7 @@ export const marketplaceBrowserTools = browserTools.filter(
     'search_groceries',
     'build_grocery_cart',
     'parallel_browse',
+    'discover_amazon_products',
     'open_amazon_product_tabs',
     'add_amazon_products',
   ].includes(tool.function.name),
@@ -240,7 +261,9 @@ AMAZON SHOPPING BRIEF
 - Shop only on Amazon.com in the United States and follow the product category, item count, price range, and delivery constraints in the private session brief.
 - Optimize for latency: use concise searches, select obvious eligible products, and avoid unnecessary comparison once the requested number of supported products is found.
 - Choose distinct, clearly matching merchandise. Use one-time purchases, not subscriptions, and delivery rather than pickup.
-- After a concise Amazon search exposes at least five plausible canonical product links, call open_amazon_product_tabs once with 5–10 candidates. Its independent Qwen vision workers inspect all candidates concurrently. Trust their structured verdicts rather than repeating their work serially.
+- Begin by calling discover_amazon_products with several diverse, targeted merchandise queries in parallel. For a general llama-merch request, use categories such as llama plush, llama shirt, llama mug, llama decor, llama socks, llama keychain, llama tote bag, and llama stationery. Do not rely on one broad result page.
+- Products sharing an ASIN are duplicates even when Amazon shows different URLs. If discovery or inspection leaves fewer than five distinct eligible ASINs, immediately run another discovery wave with new category synonyms and inspect the new candidates. Insufficient or duplicate results are NOT a reason to stop or ask the user whether to broaden the search.
+- Call open_amazon_product_tabs with 5–10 unique candidates per wave. Its independent Qwen vision workers inspect all candidates concurrently. Trust their structured verdicts rather than repeating their work serially. Continue discovery/inspection waves until five eligible distinct products are accumulated, unless Amazon presents a genuine login, CAPTCHA, or access blocker.
 - Select exactly five eligible distinct products, then call add_amazon_products once with those five URLs. That tool adds all five concurrently and returns the live cart observation. Do not add the products one at a time.
 - Verify from the returned live cart that every selected product and quantity is present; do not claim success from an Add-to-Cart confirmation alone.
 - Return a concise final answer with clickable product links, titles, item prices, quantities, visible subtotal, and cart verification state. Do not repeat private delivery details.

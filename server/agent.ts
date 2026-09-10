@@ -859,6 +859,69 @@ export async function executeGeneral(
                     send("action",{label:`${label}: ${remote.url()}`,actions:++actions,status:tabWork.get(remote)==="error"?"error":"done"});
                     page=remote;generalPage=remote;await capture(label,call.id);
                   }, signal);
+                } else if (call.name === "discover_amazon_products") {
+                  const supplied = args.queries;
+                  if (!Array.isArray(supplied) || supplied.length < 2 || supplied.length > 8)
+                    throw new Error("Choose 2–8 targeted Amazon search queries.");
+                  const queries = [...new Set(supplied.map((query) => String(query).trim()).filter(Boolean))];
+                  if (queries.length < 2)
+                    throw new Error("Choose at least two distinct Amazon search queries.");
+                  const searches = await Promise.all(queries.map(async (query, workerIndex) => {
+                    const tab = await generalContext!.newPage();
+                    registerTabs(tab);
+                    tab.setDefaultTimeout(5000);
+                    tabWork.set(tab, "loading");
+                    try {
+                      await showWorkerProgress(tab, `Amazon search ${workerIndex + 1}: ${query}`, call.id);
+                      await tab.goto(`https://www.amazon.com/s?k=${encodeURIComponent(query)}`, {
+                        waitUntil: "domcontentloaded",
+                        timeout: 15000,
+                      });
+                      await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
+                      tabWork.set(tab, "reading");
+                      const products = await tab.locator('a[href*="/dp/"], a[href*="/gp/product/"]').evaluateAll((anchors) =>
+                        anchors.slice(0, 80).map((anchor) => ({
+                          href: (anchor as HTMLAnchorElement).href,
+                          title: (anchor.getAttribute("aria-label") || anchor.textContent || "").trim().replace(/\s+/g, " ").slice(0, 180),
+                        })),
+                      );
+                      tabWork.set(tab, "ready");
+                      await showWorkerProgress(tab, `Amazon search ${workerIndex + 1}: found candidates`, call.id);
+                      return { query, products };
+                    } catch (error) {
+                      tabWork.set(tab, "error");
+                      return {
+                        query,
+                        products: [] as { href: string; title: string }[],
+                        error: error instanceof Error ? friendlyBrowserError(error.message) : "Search failed.",
+                      };
+                    }
+                  }));
+                  const unique = new Map<string, { asin: string; url: string; title: string; query: string }>();
+                  for (const search of searches) {
+                    for (const product of search.products) {
+                      const match = product.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
+                      if (!match) continue;
+                      const asin = match[1].toUpperCase();
+                      if (!unique.has(asin))
+                        unique.set(asin, {
+                          asin,
+                          url: `https://www.amazon.com/dp/${asin}`,
+                          title: product.title || "Amazon product",
+                          query: search.query,
+                        });
+                    }
+                  }
+                  const products = [...unique.values()].slice(0, 30);
+                  value = {
+                    products,
+                    uniqueCount: products.length,
+                    searches: searches.map(({ query, products, ...rest }) => ({ query, candidateCount: products.length, ...rest })),
+                    next: products.length >= 5
+                      ? "Inspect 5–10 of the strongest unique canonical product URLs now. If fewer than five qualify, run another discovery wave with different category queries."
+                      : "Immediately run another discovery wave with broader, different merchandise-category queries. Do not finish or ask the user for permission.",
+                  };
+                  await capture(`Discovered ${products.length} unique Amazon products`, call.id);
                 } else if (call.name === "open_amazon_product_tabs") {
                   const supplied = args.urls;
                   if (!Array.isArray(supplied) || supplied.length < 5 || supplied.length > 10)
