@@ -16,6 +16,7 @@ import {
   amazonBrowserTools,
   authorizedAmazonPurchaseAction,
   browserSystem,
+  classifyAmazonOrderState,
   consequentialLabel,
   marketplaceBrowserTools,
   readPageScript,
@@ -662,6 +663,7 @@ export async function executeGeneral(
     id = randomUUID();
   let actions = 0;
   let summary = "";
+  let orderSubmissionPending = false;
   let page: Page | undefined;
   let pointer: { x: number; y: number } | null = null;
   const timings: AgentCallTiming[] = [];
@@ -1195,9 +1197,47 @@ export async function executeGeneral(
                   await page.bringToFront();
                   value = await read();
                   await capture("Switched tab", call.id);
+                } else if (call.name === "wait_for_order_confirmation") {
+                  if (configuration().demo !== "amazon" || !configuration().amazonPurchaseAuthorized)
+                    throw new Error("Order confirmation waiting is available only in an authorized Amazon session.");
+                  if (!orderSubmissionPending)
+                    throw new Error("No submitted Amazon order is awaiting confirmation.");
+                  const deadline = Date.now() + 45_000;
+                  let state = classifyAmazonOrderState(
+                    page!.url(),
+                    await page!.locator("body").innerText({ timeout: 5000 }).catch(() => ""),
+                  );
+                  while (state === "pending" && Date.now() < deadline) {
+                    await page!.waitForTimeout(2000);
+                    state = classifyAmazonOrderState(
+                      page!.url(),
+                      await page!.locator("body").innerText({ timeout: 5000 }).catch(() => ""),
+                    );
+                    await capture("Waiting for payment authorization", call.id);
+                  }
+                  if (state !== "pending") orderSubmissionPending = false;
+                  value = {
+                    status: state,
+                    page: await read(),
+                    next:
+                      state === "pending"
+                        ? "Payment authorization is still pending. Call wait_for_order_confirmation again; do not call finish."
+                        : state === "confirmed"
+                          ? "Order confirmation is visible. Call finish with the confirmed status and non-sensitive confirmation identifier."
+                          : state === "manual_action"
+                            ? "Manual authentication or approval is required. Call finish and identify the blocker without exposing private information."
+                            : "Payment or order submission definitively failed. Call finish with the failure state; do not retry the purchase automatically.",
+                  };
+                  await capture(`Amazon order ${state.replace("_", " ")}`, call.id);
                 } else if (call.name === "finish") {
-                  summary = String(args.summary || "Done.");
-                  value = "Task complete.";
+                  if (orderSubmissionPending) {
+                    value = {
+                      error: "The submitted order is still awaiting bank/payment authorization. Call wait_for_order_confirmation instead of finishing.",
+                    };
+                  } else {
+                    summary = String(args.summary || "Done.");
+                    value = "Task complete.";
+                  }
                 } else if (
                   ["click", "fill", "press", "select"].includes(call.name)
                 ) {
@@ -1239,6 +1279,11 @@ export async function executeGeneral(
                         `User approval required for “${label.trim().slice(0, 80)}”. Stop and show what is ready.`,
                       );
                     await locator.click({ timeout: 4000 });
+                    if (
+                      authorizedAmazonPurchase &&
+                      /\b(?:place (?:your )?order|confirm order|submit order)\b/i.test(label)
+                    )
+                      orderSubmissionPending = true;
                   } else if (call.name === "select") {
                     await locator.selectOption(String(args.value));
                   } else if (call.name === "fill") {

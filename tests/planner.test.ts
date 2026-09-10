@@ -64,6 +64,7 @@ test("full slots are never selected and incomplete quotes never win", () => {
 });
 import {
   authorizedAmazonPurchaseAction,
+  classifyAmazonOrderState,
   readPageScript,
   safePublicURL,
 } from "../shared/browser-tools";
@@ -99,5 +100,24 @@ test("real order controls require an explicitly authorized Amazon session", () =
   assert.equal(
     authorizedAmazonPurchaseAction("Buy Now", "amazon", true),
     false,
+  );
+});
+
+test("Amazon payment authorization is not mistaken for order confirmation", () => {
+  assert.equal(
+    classifyAmazonOrderState("https://www.amazon.com/checkout", "Authorizing bank…"),
+    "pending",
+  );
+  assert.equal(
+    classifyAmazonOrderState("https://www.amazon.com/gp/buy/thankyou", "Thank you"),
+    "confirmed",
+  );
+  assert.equal(
+    classifyAmazonOrderState("https://www.amazon.com/checkout", "Your payment was declined"),
+    "failed",
+  );
+  assert.equal(
+    classifyAmazonOrderState("https://www.amazon.com/checkout", "Enter the one-time passcode"),
+    "manual_action",
   );
 });
