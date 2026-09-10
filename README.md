@@ -43,6 +43,8 @@ After Dash collects plausible search-result links, it fans out up to ten indepen
 
 Worker tabs appear in the Dash tab strip as soon as they are created. While processing continues concurrently, the pop-out browser and embedded preview rotate through individual worker tabs after live gallery, read, and scroll actions; the status line identifies the worker currently on screen.
 
+The submitted request remains pinned at the top of the assistant panel throughout processing and after the final answer, so the demo audience can always see the task the workers are executing.
+
 ## Verification
 
 ```bash

@@ -220,6 +220,31 @@ body {
   font-weight: 400;
   color: #688070;
 }
+.demo-pinned-prompt {
+  flex-shrink: 0;
+  padding: 11px 14px 12px;
+  border-bottom: 1px solid #dce1de;
+  background: #f4f8f5;
+}
+.demo-pinned-prompt span {
+  display: block;
+  margin-bottom: 5px;
+  color: #557064;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.demo-pinned-prompt p {
+  max-height: 7.2em;
+  margin: 0;
+  overflow-y: auto;
+  color: #183126;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+  scrollbar-width: thin;
+}
 .demo-feed {
   padding: 14px 16px;
   max-height: 690px;

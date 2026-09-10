@@ -490,6 +490,12 @@ export default function App() {
                             : "Ready"}
                   </small>
                 </div>
+                {dash.prompt && (
+                  <section className="demo-pinned-prompt" aria-label="Current task">
+                    <span>Current task</span>
+                    <p>{dash.prompt}</p>
+                  </section>
+                )}
                 <ThreadPrimitive.Viewport className="demo-feed">
                   {dash.prompt ? (
                     <DashMessages />
