@@ -328,7 +328,10 @@ export async function executeGeneral(
   try {
     send("start", { mode: "cerebras", model: configuration().model });
     page = await warmGeneral();
-    for (const candidate of page.context().pages()) {
+    // Headless pages all report visible; keep the adopted cart tab in that mode.
+    const takeoverCandidates =
+      process.env.BROWSER_HEADLESS === "true" ? [] : page.context().pages();
+    for (const candidate of takeoverCandidates) {
       if (
         !candidate.isClosed() &&
         (await candidate

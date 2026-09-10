@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { warmBrowser, acquireBrowser, closeBrowser } from "../server/browser";
-import { adoptGeneralPage, warmGeneral, closeGeneral } from "../server/agent";
+import {
+  adoptGeneralPage,
+  warmGeneral,
+  closeGeneral,
+  executeGeneral,
+} from "../server/agent";
 
 process.env.BROWSER_HEADLESS = "true";
 try {
@@ -14,9 +19,20 @@ try {
     page,
     "Adoption must preserve the exact cart tab",
   );
-  await page.goto("https://en.wikipedia.org/wiki/Lisbon", {
-    waitUntil: "domcontentloaded",
-  });
+  const events: Record<string, unknown>[] = [];
+  await executeGeneral(
+    "Open https://en.wikipedia.org/wiki/Lisbon and briefly identify the city.",
+    (event) => events.push(event),
+    new AbortController().signal,
+  );
+  assert(
+    !events.some((event) => event.type === "error"),
+    "Full agent loop must preserve the adopted tab",
+  );
+  assert(
+    events.some((event) => event.type === "done"),
+    "Agent must finish the public-page request",
+  );
   assert.match(await page.locator("h1").innerText(), /Lisbon/);
   let privateBlocked = false;
   try {
