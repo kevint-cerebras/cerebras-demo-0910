@@ -58,4 +58,4 @@ The functional checks cover dietary substitutions, missing approval, mismatched 
 
 The live Screen Studio take completed the shopping request in 1.43 seconds with 130 actions and one model call. The public Wikipedia task then completed in 3.93 seconds with three model calls. The editable project is saved in `artifacts/Dash - live browser assistant.screenstudio`.
 
-Frame inspection found a macOS recording-permission dialog covering the captured display. This take is a rehearsal, not a finished video. A clean retake requires the user to clear that dialog. Screen Studio export also requires an active license; no subscription was purchased.
+Frame inspection found a macOS recording-permission dialog covering part of the take. Later frames show the dialog cleared and the public-site task completed. This take is a rehearsal, not a finished video. The Mac locked before a clean retake could begin. Screen Studio export also requires an active license; no subscription was purchased.
