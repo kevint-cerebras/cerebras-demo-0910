@@ -313,10 +313,6 @@ export default function App() {
                   aria-label="Development timing overlay"
                   onClick={() => setDetails(!details)}
                 >
-                  <strong data-testid="elapsed-stat">
-                    {(elapsed / 1000).toFixed(2)}
-                    <small>s</small>
-                  </strong>
                   <span>
                     <b>{dash.metrics.actions}</b> browser actions
                   </span>

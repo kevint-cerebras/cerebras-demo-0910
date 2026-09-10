@@ -265,7 +265,7 @@ const candidateWorkerTools = [
     type: "function",
     function: {
       name: "finish_candidate",
-      description: "Return the final evidence-backed verdict for this listing. Always call this after inspecting all available photos and shipping details, or when blocked.",
+      description: "Return the final evidence-backed verdict for this listing after inspecting its first photo and shipping details, or when blocked.",
       parameters: {
         type: "object",
         properties: {
@@ -284,9 +284,7 @@ const candidateWorkerTools = [
   },
 ] as const;
 
-const candidateWorkerSystem = `You are one worker in a parallel Facebook Marketplace inspection pool. Inspect only the listing already open in your assigned tab. You receive a fresh screenshot on every turn and must use image pixels—not titles, DOM text, alt text, or thumbnails—to decide whether the goose statue has a visibly open beak with a clear gap between upper and lower beak.
-
-Click through every available product photo. After each gallery action, use the next screenshot or photo counter to confirm the image changed. If Next is inert, try one alternate thumbnail or ArrowRight once, then stop looping. Separately verify visible listing text says the item can ship or be delivered to Sunnyvale, CA 94085; pickup-only or unclear shipping is not a match. Do not navigate away from this listing.
+const candidateWorkerSystem = `You are one worker in a parallel Facebook Marketplace inspection pool. Inspect only the listing already open in your assigned tab. For minimum latency, judge ONLY the supplied first listing screenshot; do not request or inspect additional gallery photos. Use image pixels—not titles, DOM text, alt text, or thumbnails—to decide whether the goose statue has a visibly open beak with a clear gap between upper and lower beak. Separately verify visible listing text says the item can ship or be delivered to Sunnyvale, CA 94085; pickup-only or unclear shipping is not a match. Do not navigate away from this listing.
 
 This is strictly read-only. Never message/contact the seller, make an offer, save, buy, enter personal information, or operate authentication controls. If login, CAPTCHA, OTP, passkey, or another blocker prevents inspection, return blocked. Always end by calling finish_candidate with concise structured evidence. A match requires BOTH pixel-visible open-beak proof and explicit Sunnyvale shipping proof.`;
 
@@ -308,106 +306,58 @@ async function inspectMarketplaceListing(
   reportAction: (label: string) => Promise<void>,
 ): Promise<CandidateVerdict> {
   const canonicalURL = candidatePage.url();
-  const messages: ChatMessage[] = [{
-    role: "user",
-    content: `Inspect this single listing completely and return a verdict. Current page: ${JSON.stringify(await candidatePage.evaluate(readPageScript))}`,
+  const observations: unknown[] = [await candidatePage.evaluate(readPageScript)];
+  signal.throwIfAborted();
+  const firstPhoto = await candidatePage.screenshot({
+    type: "jpeg",
+    quality: 64,
+    animations: "disabled",
+    timeout: 5000,
+  });
+  await reportAction("captured first listing photo");
+
+  const evidence: (
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string; detail: "low" } }
+  )[] = [{
+    type: "text",
+    text: `Return the final verdict for this listing using only its first photo. Listing URL: ${canonicalURL}\nDOM observation: ${JSON.stringify(observations).slice(0, 14000)}`,
   }];
-  for (let turn = 0; turn < 12; turn += 1) {
-    signal.throwIfAborted();
-    const screenshot = await candidatePage.screenshot({
-      type: "jpeg",
-      quality: 72,
-      animations: "disabled",
-      timeout: 5000,
-    });
-    const calls: ToolCall[] = [];
-    const step = await modelStep(
-      [
-        ...messages,
-        {
-          role: "user",
-          content: [
-            { type: "text", text: "Fresh screenshot for this listing worker. Base every visual claim on these pixels." },
-            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${screenshot.toString("base64")}`, detail: "low" } },
-          ],
-        },
-      ],
-      (call) => calls.push(call),
-      signal,
-      false,
-      { system: candidateWorkerSystem, tools: candidateWorkerTools, maxCompletionTokens: 1800 },
-    );
-    reportInference(step.timing);
-    messages.push({ role: "assistant", content: null, tool_calls: step.calls });
-    for (const call of calls) {
-      const args = call.arguments;
-      let result: unknown;
-      try {
-        if (call.name === "finish_candidate") {
-          const status = String(args.status);
-          if (!["match", "no_match", "blocked"].includes(status))
-            throw new Error("Invalid candidate status.");
-          const verdict: CandidateVerdict = {
-            status: status as CandidateVerdict["status"],
-            title: String(args.title || "Unknown listing"),
-            price: String(args.price || "Unknown price"),
-            location: String(args.location || "Unknown location"),
-            url: String(args.url || candidatePage.url() || canonicalURL),
-            photoEvidence: String(args.photoEvidence || "No visual evidence recorded."),
-            shippingEvidence: String(args.shippingEvidence || "No shipping evidence recorded."),
-            reason: String(args.reason || "No reason recorded."),
-          };
-          await reportAction(`Worker finished: ${verdict.title}`);
-          return verdict;
-        }
-        if (call.name === "read_page") {
-          result = await candidatePage.evaluate(readPageScript);
-        } else if (call.name === "scroll") {
-          const direction = String(args.direction);
-          if (!["up", "down"].includes(direction)) throw new Error("Choose up or down.");
-          await candidatePage.evaluate((value) => window.scrollBy({
-            top: (value === "up" ? -1 : 1) * innerHeight * 0.8,
-            behavior: "instant",
-          }), direction);
-          result = await candidatePage.evaluate(readPageScript);
-        } else if (["click", "press"].includes(call.name)) {
-          if (typeof args.id !== "string" || !/^[a-f0-9]{8}-\d{1,2}$/.test(args.id))
-            throw new Error("Use an element ID from the latest observation.");
-          const currentSnapshot = await candidatePage.evaluate(
-            () => document.documentElement.dataset.dashSnapshotId,
-          );
-          if (currentSnapshot !== args.id.split("-")[0])
-            throw new Error("The observation is stale. Read the page again.");
-          const locator = candidatePage.locator(`[data-dash-node="${args.id}"]`);
-          const label = (await locator.getAttribute("aria-label")) || (await locator.textContent()) || "";
-          if (consequentialLabel.test(label))
-            throw new Error("Messaging, offers, saves, and purchases are blocked.");
-          if (call.name === "click") await locator.click({ timeout: 4000 });
-          else {
-            if (!["ArrowRight", "Escape"].includes(String(args.key))) throw new Error("Unsupported key.");
-            await locator.press(String(args.key));
-          }
-          result = await candidatePage.evaluate(readPageScript);
-        } else {
-          throw new Error(`Unsupported worker action: ${call.name}`);
-        }
-        await reportAction(`Worker ${call.name}`);
-      } catch (error) {
-        result = { error: error instanceof Error ? friendlyBrowserError(error.message) : "Worker action failed." };
-      }
-      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
-    }
-  }
-  return {
-    status: "blocked",
-    title: await candidatePage.title().catch(() => "Unknown listing"),
-    price: "Unknown price",
-    location: "Unknown location",
+  evidence.push({
+    type: "image_url",
+    image_url: { url: `data:image/jpeg;base64,${firstPhoto.toString("base64")}`, detail: "low" },
+  });
+  const calls: ToolCall[] = [];
+  const step = await modelStep(
+    [{ role: "user", content: evidence }],
+    (call) => calls.push(call),
+    signal,
+    false,
+    {
+      system: candidateWorkerSystem,
+      tools: candidateWorkerTools.filter((tool) => tool.function.name === "finish_candidate"),
+      maxCompletionTokens: 1200,
+    },
+  );
+  reportInference(step.timing);
+  const call = calls.find((candidate) => candidate.name === "finish_candidate");
+  if (!call) throw new Error("Candidate worker did not return a verdict.");
+  const args = call.arguments;
+  const status = String(args.status);
+  if (!["match", "no_match", "blocked"].includes(status))
+    throw new Error("Invalid candidate status.");
+  const verdict: CandidateVerdict = {
+    status: status as CandidateVerdict["status"],
+    title: String(args.title || await candidatePage.title().catch(() => "Unknown listing")),
+    price: String(args.price || "Unknown price"),
+    location: String(args.location || "Unknown location"),
     url: candidatePage.url() || canonicalURL,
-    photoEvidence: "The worker did not complete gallery verification within 12 steps.",
-    shippingEvidence: "Shipping verification was incomplete.",
-    reason: "Worker step limit reached.",
+    photoEvidence: String(args.photoEvidence || "No visual evidence recorded."),
+    shippingEvidence: String(args.shippingEvidence || "No shipping evidence recorded."),
+    reason: String(args.reason || "No reason recorded."),
   };
+  await reportAction(`finished: ${verdict.title}`);
+  return verdict;
 }
 let generalContext: BrowserContext | undefined;
 let generalPage: Page | undefined;
