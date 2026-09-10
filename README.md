@@ -39,7 +39,7 @@ My friend Qi is an avid collector of statues of geese. Look for all geese statue
 
 The fixed brief behind the composer narrows the output to two verified matches and requires the final answer to include clickable listing links, prices, locations, photo evidence, and shipping evidence.
 
-After Dash collects plausible search-result links, it may preload up to ten Facebook Marketplace listings concurrently in tabs sharing the logged-in profile. It then switches through those tabs sequentially for screenshot-based photo verification and always calls the final-answer tool after two matches or an unavoidable blocker.
+After Dash collects plausible search-result links, it fans out up to ten independent Qwen workers concurrently. Each worker owns one Facebook Marketplace tab in the shared logged-in context, receives fresh screenshots, clicks through that listing's gallery, verifies open-beak pixels and Sunnyvale shipping, and returns a structured verdict. The parent coordinator gathers every verdict and always calls the final-answer tool with the best two matches or an explicit blocker result.
 
 ## Verification
 
