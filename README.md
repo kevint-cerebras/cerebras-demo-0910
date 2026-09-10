@@ -71,3 +71,5 @@ Example request: “Find me a restaurant that serves a gluten free dish without 
 - https://www.asianbox.com/location/palo-alto/
 
 These are operator-selected starting pages for the known query. They are not restaurant answers baked into the agent. The same tool accepts other public URLs. Menu omissions do not establish that an ingredient is absent; the answer must identify any restaurant confirmation still needed.
+
+Preloaded pages stay hidden behind the Google homepage until the agent uses them. The plus button clears visible task tabs while retaining explicitly preloaded pages in the background. The preload timing disclosure remains visible.

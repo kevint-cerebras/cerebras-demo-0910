@@ -203,6 +203,7 @@ Environment: The premade grocery store is Goodmarket at http://127.0.0.1:${proce
 let generalContext: BrowserContext | undefined;
 let generalPage: Page | undefined;
 const tabPages = new Map<string, Page>();
+const hiddenPreparedPages = new Set<Page>();
 const tabWork = new Map<Page, "loading" | "reading" | "ready" | "error">();
 let remoteBrowser: Browser | undefined;
 let remoteWarming: Promise<void> | undefined;
@@ -236,12 +237,14 @@ async function remotePage(url: string) {
   preparedPages.set(url,page);registerTabs(page);
   return {page,reused:false};
 }
-async function inspectRemotePages(urls: string[], report: (page: Page, label: string, duration: number, category: string)=>Promise<void>, signal?: AbortSignal) {
+async function inspectRemotePages(urls: string[], report: (page: Page, label: string, duration: number, category: string)=>Promise<void>, signal?: AbortSignal, reveal = true) {
   if(!Array.isArray(urls)||urls.length<1||urls.length>6)throw new Error("Choose 1–6 URLs.");
   const validated=[...new Set(urls.map(url=>safePublicURL(url)))];
   return Promise.all(validated.map(async url=>{
     signal?.throwIfAborted();
     const {page,reused}=await remotePage(url);
+    if (reveal) { hiddenPreparedPages.delete(page); registerTabs(page); }
+    else hiddenPreparedPages.add(page);
     const cancelled=()=>{void page.close().catch(()=>{});};
     signal?.addEventListener("abort",cancelled,{once:true});
     try {
@@ -270,12 +273,11 @@ export async function prepareBrowserPages(urls: string[]) {
   busy=true;
   const start=performance.now();
   try {
-    const results=await inspectRemotePages(urls,async()=>{});
+    const results=await inspectRemotePages(urls,async()=>{},undefined,false);
     const success=results.filter(result=>!("error" in result));
     explicitlyPreparedURLs=success.map(result=>result.requestedURL);
     preparation={count:success.length,duration:performance.now()-start,at:new Date().toISOString()};
-    const first=success[0];
-    if(first){generalPage=preparedPages.get(first.requestedURL);viewedPage=undefined;}
+    await resetBrowserView();
     return {page:await generalPreview(),results:results.map(result=>({url:result.requestedURL,error:"error" in result?result.error:undefined})),preparation};
   } finally {busy=false;}
 }
@@ -286,8 +288,9 @@ function registerTabs(page: Page) {
     if (![...tabPages.values()].includes(tab)) tabPages.set(randomUUID(), tab);
 }
 async function browserTabs(active: Page) {
+  hiddenPreparedPages.delete(active);
   registerTabs(active);
-  return Promise.all([...tabPages.entries()].filter(([,p])=>!p.isClosed()).map(async ([id,p])=>({id,url:p.url(),title:await p.title().catch(()=>p.url()),active:p===active,work:tabWork.get(p)})));
+  return Promise.all([...tabPages.entries()].filter(([,p])=>!p.isClosed() && !hiddenPreparedPages.has(p)).map(async ([id,p])=>({id,url:p.url(),title:await p.title().catch(()=>p.url()),active:p===active,work:tabWork.get(p)})));
 }
 export async function selectBrowserTab(id: string) {
   const page=tabPages.get(id);
@@ -809,24 +812,27 @@ export async function generalPreview() {
   };
 }
 
+async function resetBrowserView() {
+  await warmGeneral();
+  const page = generalContext!.pages().find(p=>!p.isClosed()) || await generalContext!.newPage();
+  const cached = explicitlyPreparedURLs.map(url=>preparedPages.get(url)).filter((p): p is Page=>Boolean(p && !p.isClosed()));
+  const retainedContexts = new Set(cached.map(p=>p.context()));
+  const contexts = new Set([...tabPages.values()].filter(p=>!p.isClosed()).map(p=>p.context()));
+  await Promise.all([...contexts].filter(context=>context!==generalContext && !retainedContexts.has(context)).map(context=>context.close()));
+  await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
+  tabPages.clear();tabWork.clear();hiddenPreparedPages.clear();
+  cached.forEach(p=>hiddenPreparedPages.add(p));
+  for(const [url,p] of preparedPages) if(p.isClosed() || !explicitlyPreparedURLs.includes(url)) preparedPages.delete(url);
+  void warmRemoteWorkers().catch(()=>{});
+  viewedPage = undefined;generalPage = page;
+  await page.route("**/*", routeGeneralResource);
+  if(page.url()!=="https://www.google.com/") await page.goto("https://www.google.com/",{waitUntil:"domcontentloaded",timeout:12000});
+}
 export async function resetGeneralBrowser() {
   if (busy) throw new Error("Wait for the current browser action to finish.");
-  busy = true;
-  try {
-    await warmGeneral();
-    const page = generalContext!.pages().find(p=>!p.isClosed()) || await generalContext!.newPage();
-    const contexts = new Set([...tabPages.values()].filter(p=>!p.isClosed()).map(p=>p.context()));
-    await Promise.all([...contexts].filter(context=>context!==generalContext).map(context=>context.close()));
-    await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
-    tabPages.clear();
-    tabWork.clear();preparedPages.clear();explicitlyPreparedURLs=[];preparation=null;
-    void warmRemoteWorkers().catch(()=>{});
-    viewedPage = undefined;
-    generalPage = page;
-    await page.route("**/*", routeGeneralResource);
-    await page.goto("https://www.google.com/", { waitUntil: "domcontentloaded", timeout: 12000 });
-    return await generalPreview();
-  } finally { busy = false; }
+  busy=true;
+  try {await resetBrowserView();return await generalPreview();}
+  finally {busy=false;}
 }
 
 export async function interactGeneralBrowser(input: {type: string; x?: number; y?: number; deltaX?: number; deltaY?: number; key?: string; text?: string}) {

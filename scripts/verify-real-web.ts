@@ -24,6 +24,13 @@ try {
   const preparation=await (await preparationResponse).json();
   assert.equal(preparation.preparation.count,4);
   await dialog.waitFor({state:'hidden'});
+  assert.equal(await page.getByRole('tab').count(),1,'Prepared sites stay hidden');
+  assert((await page.locator('.general-address').innerText()).includes('google.com'));
+  await page.getByRole('button',{name:'New browser task'}).click();
+  await page.waitForFunction(()=>document.querySelector('.general-address')?.textContent?.includes('google.com'));
+  const afterReset=await (await fetch(base+'/api/browser/preload')).json();
+  assert.equal(afterReset.page.tabs.length,1);
+  assert.equal(afterReset.page.preparation.at,preparation.preparation.at,'Plus must preserve the original preload');
   await page.evaluate(()=>{
     (window as any).maxReading=0;
     new MutationObserver(()=>{(window as any).maxReading=Math.max((window as any).maxReading,document.querySelectorAll('.browser-tab.working').length)}).observe(document.body,{subtree:true,attributes:true,childList:true});
@@ -35,6 +42,7 @@ try {
   const result=events.find(e=>e.type==='result')?.result;
   assert.equal(result.status,'done');
   assert(events.some(e=>e.label==='parallel_browse'));
+  assert(events.filter(e=>e.type==='browser-action' && e.label?.startsWith('Reading preloaded page:')).length>=3,'The submitted task must reuse cached pages');
   assert(await page.evaluate(()=>(window as any).maxReading>=3));
   await page.locator('.answer-text').waitFor();
   assert(await page.locator('.answer-text a').count()>=2,'Answer should link menu and location evidence');
