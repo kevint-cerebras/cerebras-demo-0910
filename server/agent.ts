@@ -227,7 +227,10 @@ export async function warmRemoteWorkers() {
 }
 async function remotePage(url: string) {
   const cached=preparedPages.get(url);
-  if(cached && !cached.isClosed() && cached.url()===url) return {page:cached,reused:true};
+  if(cached && !cached.isClosed()) {
+    const current=new URL(cached.url()), requested=new URL(url);
+    if(current.origin===requested.origin && current.pathname===requested.pathname && [...requested.searchParams].every(([key,value])=>current.searchParams.get(key)===value)) return {page:cached,reused:true};
+  }
   await warmRemoteWorkers();
   let page=remotePages.find(p=>!p.isClosed() && p.url()==="about:blank" && ![...preparedPages.values()].includes(p));
   if(!page){
@@ -274,11 +277,17 @@ export async function prepareBrowserPages(urls: string[]) {
   const start=performance.now();
   try {
     const results=await inspectRemotePages(urls,async()=>{},undefined,false);
-    const success=results.filter(result=>!("error" in result));
+    const isVerification = (result: typeof results[number]) => "url" in result && /https:\/\/(?:www\.)?google\.[^/]+\/sorry\//.test(result.url);
+    const verification=results.find(isVerification);
+    const success=results.filter(result=>!("error" in result) && !isVerification(result));
     explicitlyPreparedURLs=success.map(result=>result.requestedURL);
     preparation={count:success.length,duration:performance.now()-start,at:new Date().toISOString()};
-    await resetBrowserView();
-    return {page:await generalPreview(),results:results.map(result=>({url:result.requestedURL,error:"error" in result?result.error:undefined})),preparation};
+    if (verification) {
+      generalPage=preparedPages.get(verification.requestedURL);
+      viewedPage=undefined;
+      if(generalPage) hiddenPreparedPages.delete(generalPage);
+    } else await resetBrowserView();
+    return {page:await generalPreview(),results:results.map(result=>({url:result.requestedURL,actualURL:"url" in result?result.url:undefined,title:"title" in result?result.title:undefined,error:"error" in result?result.error:isVerification(result)?"Google requires a CAPTCHA. Complete it in the browser preview, then preload the search URL again.":undefined})),preparation};
   } finally {busy=false;}
 }
 
@@ -310,6 +319,8 @@ function routeGeneralResource(route: Route) {
   } catch {
     return route.abort();
   }
+  const parsedURL = new URL(url);
+  if (/\/(?:recaptcha|sorry)\//.test(parsedURL.pathname) && /(^|\.)(google\.com|gstatic\.com)$/.test(parsedURL.hostname)) return route.continue();
   if (
     ["image", "media", "font"].includes(request.resourceType()) ||
     /doubleclick|google-analytics|googletagmanager|facebook\.net|hotjar|segment\.io/.test(
