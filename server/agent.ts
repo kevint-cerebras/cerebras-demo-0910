@@ -50,6 +50,7 @@ export async function modelStep(
   messages: ChatMessage[],
   onCall: (call: ToolCall) => void,
   signal: AbortSignal,
+  finishOnly = false,
 ) {
   const config = configuration();
   if (config.mode !== "cerebras")
@@ -81,7 +82,7 @@ export async function modelStep(
         content: `${browserSystem}
 Environment: The premade grocery store is Goodmarket at http://127.0.0.1:${process.env.PORT || 3100}/shop/goodmarket. It is a local commerce sandbox with real DOM controls and a persistent cart. Use this store by default for grocery orders.`,
       }, ...messages],
-      tools: browserTools,
+      tools: finishOnly ? browserTools.filter(tool=>tool.function.name === "finish") : browserTools,
       tool_choice: "required",
       parallel_tool_calls: true,
       stream: true,
@@ -435,7 +436,9 @@ export async function executeGeneral(
               });
               let value: unknown;
               try {
-                if (call.name === "search_groceries") {
+                if (groceries.approval && call.name !== "finish") {
+                  value = {error: "A cart is already verified and awaiting approval. Call finish with its total and delivery. Do not build more carts."};
+                } else if (call.name === "search_groceries") {
                   value = await groceries.search(args.queries as string[]);
                 } else if (call.name === "build_grocery_cart") {
                   value = await groceries.cart(args.store as StoreId, args.items as {id: string; quantity: number}[], String(args.slot));
@@ -597,6 +600,7 @@ export async function executeGeneral(
                     ? "error"
                     : "done",
                 result: call.name === "finish" ? summary : undefined,
+                error: typeof value === "object" && value !== null && "error" in value ? friendlyBrowserError(String(value.error)) : undefined,
               });
               results.push({ call, result: value });
             })
@@ -612,6 +616,7 @@ export async function executeGeneral(
           pendingActions = queue;
         },
         signal,
+        Boolean(groceries.approval),
       );
       timings.push(step.timing);
       recordSpan({

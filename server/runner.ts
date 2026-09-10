@@ -390,6 +390,7 @@ export class ShoppingRun {
               this.emit("browser-action", {
                 label: event.label,
                 status: event.status,
+                error: event.error,
               });
               this.emit("browser-metrics", {
                 metrics: structuredClone(this.metrics),

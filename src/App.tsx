@@ -184,6 +184,7 @@ export default function App() {
             <div key={index}>
               <span>{action.status === "error" ? "!" : "✓"}</span>{" "}
               {action.label}
+              {action.error && <span className="inline-error"> — {action.error}</span>}
             </div>
           ))}
         </div>

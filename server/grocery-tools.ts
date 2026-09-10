@@ -49,6 +49,7 @@ export class GroceryTools {
     }));
   }
   async cart(store: StoreId, items: {id: string; quantity: number}[], slot: string) {
+    if (this.approval) throw new Error('A cart is already verified. Finish and request approval instead of building another cart.');
     const page = this.lease?.pages[store];
     if (!page) throw new Error('Search groceries first, then choose an observed store.');
     if (!items.length || items.length > 30 || new Set(items.map(x=>x.id)).size !== items.length) throw new Error('Provide unique products for the cart.');
@@ -58,13 +59,16 @@ export class GroceryTools {
     }
     const name = (await page.title()).split(' · ')[0];
     this.activity({store,name,status:'cart'});
+    try {
+    if (await page.locator('#back-to-shop').isVisible()) await page.locator('#back-to-shop').click();
+    const existing = await page.locator('[data-cart-product]').evaluateAll(els=>els.map(el=>el.getAttribute('data-cart-product')));
     for (const item of items) {
       this.signal.throwIfAborted();
       const start = performance.now();
       const product = this.observed.get(item.id)!;
       await page.locator('#search').fill(product.key);
       await page.locator('#search-form').evaluate((form: HTMLFormElement)=>form.requestSubmit());
-      await page.locator(`[data-add="${item.id}"]`).click();
+      if (!existing.includes(item.id)) await page.locator(`[data-add="${item.id}"]`).click();
       await this.progress(page, `Add ${product.name}`, performance.now()-start, 'browser');
     }
     await page.locator('#open-cart').click();
@@ -93,5 +97,9 @@ export class GroceryTools {
     await this.progress(page, 'Cart verified · awaiting purchase approval', 0, 'dom');
     this.activity({store,name,status:'ready',total:cart.total});
     return { ...cart, url: page.url(), approvalRequired: true };
+    } catch (error) {
+      this.activity({store,name,status:'error'});
+      throw error;
+    }
   }
 }

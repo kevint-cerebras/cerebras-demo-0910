@@ -59,7 +59,7 @@ export function useDash() {
     label: string;
   } | null>(null);
   const [browserActions, setBrowserActions] = useState<
-    { label: string; status: string }[]
+    { label: string; status: string; error?: string }[]
   >([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [running, setRunning] = useState(false);
@@ -163,7 +163,7 @@ export function useDash() {
         case "browser-action":
           setBrowserActions((a) => [
             ...a,
-            { label: String(event.label), status: String(event.status) },
+            { label: String(event.label), status: String(event.status), error: event.error ? String(event.error) : undefined },
           ]);
           break;
         case "browser-metrics":
