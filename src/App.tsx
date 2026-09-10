@@ -13,7 +13,7 @@ import { useVoice } from "./useVoice";
 import { DashMessages, DashToolContext } from "./AssistantThread";
 import { BrowserView, DashMark, TimingPanel } from "./components";
 import ApprovalModal from "./ApprovalModal";
-import { examples, getStore, money } from "../shared/catalog";
+import { getStore, money } from "../shared/catalog";
 
 function browserPageLabel(page: { url: string; title: string } | null) {
   if (!page) return "Loading homepage…";
@@ -27,7 +27,7 @@ function browserPageLabel(page: { url: string; title: string } | null) {
 
 export default function App() {
   const dash = useDash();
-  const initialPrompt = new URLSearchParams(window.location.search).get("prompt") || examples[0].prompt;
+  const initialPrompt = new URLSearchParams(window.location.search).get("prompt") || "";
   const [input, setInput] = useState(initialPrompt);
   const [draftUpdate, setDraftUpdate] = useState({ text: initialPrompt });
   const appliedDraft = useRef<typeof draftUpdate | null>(null);
@@ -339,15 +339,19 @@ export default function App() {
                 className="demo-provider"
                 role="status"
                 aria-label={
-                  dash.health?.mode === "cerebras"
-                    ? "Powered by Cerebras"
-                    : "Local planner"
+                  dash.health?.mode === "fireworks"
+                    ? "Powered by Fireworks"
+                    : dash.health?.mode === "cerebras"
+                      ? "Powered by Cerebras"
+                      : "Provider not configured"
                 }
               >
                 <span className="status-dot" />
-                {dash.health?.mode === "cerebras"
-                  ? "Cerebras · Qwen 3.8 27B"
-                  : "Local planner"}
+                {dash.health?.mode === "fireworks"
+                  ? "Fireworks · Qwen 3.8 27B"
+                  : dash.health?.mode === "cerebras"
+                    ? "Cerebras · Qwen 3.8 27B"
+                    : "Provider not configured"}
               </span>
               <button
                 className="icon-button"
@@ -364,7 +368,7 @@ export default function App() {
               <ComposerPrimitive.Input
                 ref={composerInput}
                 aria-label="Ask Dash to use the browser"
-                placeholder="What should I take care of?"
+                placeholder="What should I find on Marketplace?"
                 onChange={(e) => {
                   const text = e.target.value;
                   queueMicrotask(() => setInput(text));
@@ -491,14 +495,14 @@ export default function App() {
                     <DashMessages />
                   ) : (
                     <div className="demo-intro">
-                      <h2>What should I take care of?</h2>
+                      <h2>What should I find?</h2>
                       <p>
-                        Give Dash a request and watch it work in the browser.
-                        Review the result before any purchase.
+                        Give Dash a Marketplace research request, then watch it
+                        inspect listings and photos in the live browser.
                       </p>
                       <p className="demo-fine">
-                        Search, compare, and explore real websites. You can
-                        take over the browser whenever the agent is idle.
+                        Research is read-only. You can take over the persistent
+                        Facebook browser whenever the agent is idle.
                       </p>
                     </div>
                   )}
@@ -514,7 +518,7 @@ export default function App() {
             </div>
           </ThreadPrimitive.Root>
           <footer className="demo-footer">
-            <span>Browser automation · Approval before purchase</span>
+            <span>Facebook Marketplace · Read-only research</span>
           </footer>
           {details && (
             <TimingPanel

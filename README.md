@@ -1,68 +1,49 @@
-# cerebras-demo-0910
+# Dash Marketplace Vision Demo
 
-Dash is a consumer browser assistant powered by Cerebras and built with assistant-ui.
+A local React + Playwright browser-agent demo for read-only Facebook Marketplace research. The live browser occupies 75% of the workspace and the Dash chat occupies 25%.
 
-A consumer browser-agent demo with a general browser and preloaded grocery sandbox. Ask Dash to open a website, search, read, or interact with page controls. For a local grocery request, Cerebras chooses ingredients, compares observed prices and dietary labels, and selects a cart. Batch DOM tools search three stores concurrently, build the selected cart, verify its contents, and choose delivery. The final purchase requires explicit approval.
+The hidden Marketplace brief asks the model to inspect every photo for plausible goose-statue listings, verify a pixel-visible open beak, verify shipping to Sunnyvale, CA 94085, and stop immediately after two qualified listings. The visible composer is intentionally blank and accepts the presenter’s natural-language request.
 
-## Run
+The agent cannot message sellers, make offers, save listings, enter credentials, or purchase anything. Those controls are blocked in code as well as in the model instructions.
 
-```sh
+## Setup
+
+```bash
 npm ci
-npm run browser:install
-cp .env.example .env
-# Set CEREBRAS_API_KEY and CEREBRAS_MODEL=qwen-3.8-27b in .env.
-npm run dev
-```
-
-Open http://localhost:3100. The assistant shell is task-neutral; shopping details appear in the tool result. The grocery request is prefilled for a short recording. Press Run once. A compact overlay stays visible by default and shows elapsed time, browser actions, model calls, and pages. Click it for the detailed stage timings.
-
-The preview starts on Google, with no store selector. The server preloads the general browser and three grocery tabs in the background. Browser processes persist across tasks, and spare grocery pages are replenished in the background as soon as a task takes a warm session. Workers run headless by default. Set `BROWSER_HEADLESS=false` for visible worker windows. The browser belongs to the demo and does not inherit the user's Chrome credentials. The fictional stores need no authentication.
-
-Goodmarket, Basket & Co., and Daybreak are functional commerce sandboxes. Their search forms, labels, prices, cart quantities, delivery selectors, and receipts are real DOM elements with working interactions. Products and prices are fictional, and no money is charged.
-
-## Execution
-
-Typing does not invoke the agent. The optional microphone uses the browser's Web Speech API to fill the draft. Finishing dictation does not submit it. There are no partial-transcript model calls; all tasks go through the same submission endpoint.
-
-After submission, Cerebras uses the DOM browser loop for every request. Browser execution starts as soon as a complete tool call is available. Tools support navigation, reading, clicking, filling, selecting, scrolling, tabs, and search. The loop has no fixed model-call cap; runs still have a 45-second timeout and can be stopped by the user. Follow-up requests can act on the current page. Login, CAPTCHA, access restrictions, and consequential actions can require user intervention.
-
-The browser uses DOM controls, blocks unnecessary resources, and waits for specific DOM conditions rather than network idle. The UI displays DOM snapshots for the local stores and screenshots for general websites. Screenshots are presentation only; the model receives DOM text and observed element IDs. Its decorative cursor does not delay execution. Warmup and task timing are separate.
-
-The assistant-ui external-store runtime provides the composer, messages, tool cards, cancellation, and purchase-approval callback. Only public packages are used.
-
-## Timing
-
-The detailed overlay records prompt-to-inference, first-token-to-browser-action, navigation, DOM extraction, browser execution, and total task time. Inference includes time to first token, first executable action, provider queue, prefill, generation, and transport/client residual. Thinking is disabled. The residual includes buffering and parsing, so it is not a pure network RTT. Parallel spans overlap and should not be summed as elapsed time.
-
-See [BENCHMARKS.md](BENCHMARKS.md) for measured results. The targets are under 500 ms between visible actions and under ten seconds from submission to cart. Provider latency can cause outliers; the overlay exposes those waits.
-
-## Verify
-
-Run the server before the browser checks.
-
-```sh
-npm test
 npm run build
-npm run verify:voice
-npm run verify:ui
-npm run verify:clip
-npm run verify:general
-npm run verify:checkout
-npm run benchmark
 ```
 
-`verify:voice` is a legacy rehearsal script from the earlier single-inference implementation; its post-submission expectations need updating for the current batch tools. `verify:ui` checks the always-visible stats, assistant-ui integration, approval gate, and mobile layout. Artifacts and traces are saved locally under `artifacts/` and ignored by Git, along with `.env` and browser profiles.
+Copy `.env.example` to `.env`, add the provider keys, and keep `.env` private. Browser cookies are stored under the ignored `.browser-profile/marketplace` directory, so a Facebook login can persist across runs.
 
-`npm run build` followed by `npm start` serves the production frontend. Live tasks require a configured Cerebras API key and model. There is no local inference fallback.
+## Launch with Cerebras
 
+```bash
+npm run marketplace:cerebras
+```
 
-The browser tab strip shows actual open tabs. Click a tab to inspect it; orange outlines indicate live work. After checkout, “What’s next?” opens a follow-up composer in the assistant panel and preserves the current page and conversation. The plus button closes task tabs and starts a new task with one Google tab.
+## Launch with Fireworks
 
+```bash
+npm run marketplace:fireworks
+```
 
-## Live restaurant comparison demo
+Open [http://localhost:3100](http://localhost:3100). Before submitting the demo prompt, use the interactive browser preview to log into Facebook if needed. Do not run both provider commands at once; both use port 3100 and the same persistent browser profile.
 
-The restaurant flow begins with a live Google Maps search after submission. Cerebras chooses candidates from those results, reads place pages and official menus in parallel, and stops when it finds one supported dish. Unlisted sauce or seasoning ingredients remain an explicit confirmation question. Nothing is contacted or booked.
+The default embedded browser runs headlessly at the process level but is visible and interactive in Dash. To request a separate native window from a normal macOS Terminal, run with `BROWSER_HEADLESS=false`.
 
-There is no page-preload UI or preparation endpoint. Browser processes are warm; search results and restaurant pages are loaded only during the task. The plus button closes task tabs and returns to Google.
+## Demo prompt
 
-Example request: “Find me a restaurant that serves a gluten free dish without onions or tomatoes that is in Palo Alto.” Run `npm run verify:real-web` to exercise the full live flow. `npx tsx scripts/record-maps-live.ts` records it at normal speed. Set `RECORDING_NAME` to choose an output basename under `artifacts/recordings`.
+```text
+My friend Qi is an avid collector of statues of geese. Look for all geese statues on facebook marketplace that can ship to sunnyvale, and give me the top options with geese with their mouths open
+```
+
+The fixed brief behind the composer narrows the output to two verified matches and requires the final answer to include clickable listing links, prices, locations, photo evidence, and shipping evidence.
+
+## Verification
+
+```bash
+npm run build
+npm test
+```
+
+The Cerebras and Fireworks launchers share the same UI, browser profile, tool policy, vision screenshots, and stopping rule; only the inference provider changes.

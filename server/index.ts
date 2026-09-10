@@ -8,8 +8,6 @@ import { stores } from "../shared/catalog";
 import type { StoreId } from "../shared/types";
 import {
   browserStatus,
-  closeBrowser,
-  warmBrowser,
   showNativePage,
 } from "./browser";
 import { configuration } from "./planner";
@@ -21,7 +19,6 @@ import {
   resetGeneralBrowser,
   interactGeneralBrowser,
   selectBrowserTab,
-  warmRemoteWorkers,
 } from "./agent";
 import { runs, ShoppingRun } from "./runner";
 import { shopHTML } from "./shop";
@@ -49,7 +46,8 @@ app.get("/api/health", (_req, res) => {
   res.json({
     status: "ok",
     mode: config.mode,
-    model: config.mode === "cerebras" ? config.model : null,
+    model: config.mode === "local" ? null : config.model,
+    provider: config.provider,
     configurationIncomplete: config.incomplete,
     browser: {
       ...browserStatus(),
@@ -100,12 +98,8 @@ app.post("/api/browser/reset", async (_req, res) => {
   try {
     res.json({ page: await resetGeneralBrowser() });
   } catch (error) {
-    res.status(409).json({ error: error instanceof Error ? error.message : "Could not return to Google." });
+    res.status(409).json({ error: error instanceof Error ? error.message : "Could not return to Marketplace." });
   }
-});
-app.post("/api/warm", async (_req, res) => {
-  await warmBrowser();
-  res.json(browserStatus());
 });
 const runInput = z.object({
   prompt: z.string().trim().min(3).max(2500),
@@ -246,18 +240,9 @@ app.use(
 );
 const server = app.listen(port, hostname, () => {
   console.log(`Dash is running at http://localhost:${port}`);
-  void warmRemoteWorkers().catch(error=>console.error("Worker warmup:",error.message));
   void warmGeneral().catch((error) =>
     console.error("Browser warmup:", error.message),
   );
-  void warmBrowser(`http://${hostname}:${port}`)
-    .then(() => console.log("Three browser tabs are warm and ready."))
-    .catch((error) =>
-      console.error(
-        "Browser warmup failed. Run npm run browser:install.",
-        error.message,
-      ),
-    );
 });
 const cleanup = setInterval(async () => {
   for (const [id, run] of runs)
@@ -274,7 +259,6 @@ async function shutdown() {
   await closeGeneral();
   clearInterval(cleanup);
   server.close();
-  await closeBrowser();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

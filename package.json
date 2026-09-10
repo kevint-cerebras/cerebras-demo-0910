@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server/index.ts",
+    "marketplace:cerebras": "node scripts/run-marketplace.mjs cerebras",
+    "marketplace:fireworks": "node scripts/run-marketplace.mjs fireworks",
     "build": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",

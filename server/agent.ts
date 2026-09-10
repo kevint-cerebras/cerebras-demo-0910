@@ -1,5 +1,7 @@
 import { performance } from "node:perf_hooks";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { showNativePage } from "./browser";
 import { randomUUID } from "node:crypto";
 import {
@@ -11,8 +13,8 @@ import {
 } from "playwright";
 import {
   browserSystem,
-  browserTools,
   consequentialLabel,
+  marketplaceBrowserTools,
   readPageScript,
   safePublicURL,
 } from "../shared/browser-tools";
@@ -39,7 +41,13 @@ export interface AgentCallTiming {
 }
 export type ChatMessage = {
   role: string;
-  content?: string | null;
+  content?:
+    | string
+    | null
+    | (
+        | { type: 'text'; text: string }
+        | { type: 'image_url'; image_url: { url: string; detail: 'low' | 'high' | 'auto' } }
+      )[];
   tool_call_id?: string;
   tool_calls?: {
     id: string;
@@ -54,9 +62,9 @@ export async function modelStep(
   finishOnly = false,
 ) {
   const config = configuration();
-  if (config.mode !== "cerebras")
+  if (config.mode === 'local')
     throw new Error(
-      "Agent execution needs the Cerebras key and model in .env.",
+      `Agent execution needs the ${config.provider} key and model in .env.`,
     );
   const start = performance.now();
   const timing: AgentCallTiming = {
@@ -78,14 +86,13 @@ export async function modelStep(
     },
     body: JSON.stringify({
       model: config.model,
-      messages: [{
-        role: "system",
-        content: `${browserSystem}
-Environment: The premade grocery store is Goodmarket at http://127.0.0.1:${process.env.PORT || 3100}/shop/goodmarket. It is a local commerce sandbox with real DOM controls and a persistent cart. Use this store by default for grocery orders.`,
-      }, ...messages],
-      tools: finishOnly ? browserTools.filter(tool=>tool.function.name === "finish") : browserTools,
+      messages: [{ role: 'system', content: browserSystem }, ...messages],
+      tools: finishOnly
+        ? marketplaceBrowserTools.filter((tool) => tool.function.name === 'finish')
+        : marketplaceBrowserTools,
       tool_choice: "required",
-      parallel_tool_calls: true,
+      // Marketplace photo decisions need the screenshot produced after each action.
+      parallel_tool_calls: false,
       stream: true,
       stream_options: { include_usage: true },
       reasoning_effort: "none",
@@ -97,7 +104,7 @@ Environment: The premade grocery store is Goodmarket at http://127.0.0.1:${proce
   if (!response.ok) {
     await response.body?.cancel();
     throw new Error(
-      `Cerebras returned HTTP ${response.status}. Check model access or try again shortly.`,
+      `${config.provider === 'cerebras' ? 'Cerebras' : 'Fireworks'} returned HTTP ${response.status}. Check model access or try again shortly.`,
     );
   }
   const calls = new Map<
@@ -146,7 +153,7 @@ Environment: The premade grocery store is Goodmarket at http://127.0.0.1:${proce
         }
         const event = JSON.parse(data);
         if (event.error)
-          throw new Error("Cerebras reported a streaming error.");
+          throw new Error(`${config.provider === 'cerebras' ? 'Cerebras' : 'Fireworks'} reported a streaming error.`);
         if (event.time_info) {
           const t = event.time_info;
           timing.providerQueue = t.queue_time * 1000;
@@ -300,8 +307,8 @@ function routeGeneralResource(route: Route) {
   const parsedURL = new URL(url);
   if (/\/(?:recaptcha|sorry)\//.test(parsedURL.pathname) && /(^|\.)(google\.com|gstatic\.com)$/.test(parsedURL.hostname)) return route.continue();
   if (
-    ["image", "media", "font"].includes(request.resourceType()) ||
-    /doubleclick|google-analytics|googletagmanager|facebook\.net|hotjar|segment\.io/.test(
+    ["font"].includes(request.resourceType()) ||
+    /doubleclick|google-analytics|googletagmanager|hotjar|segment\.io/.test(
       url,
     )
   )
@@ -318,15 +325,32 @@ export async function warmGeneral() {
     return generalPage;
   }
   warming = (async () => {
-    mkdirSync(".browser-profile/general", { recursive: true });
+    mkdirSync(".browser-profile/marketplace", { recursive: true });
+    const headless = process.env.BROWSER_HEADLESS !== "false";
+    const installedChromium = join(
+      homedir(),
+      headless
+        ? "Library/Caches/ms-playwright/chromium_headless_shell-1187/chrome-mac/headless_shell"
+        : "Library/Caches/ms-playwright/chromium-1187/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
+    );
+    const executablePath =
+      process.env.BROWSER_EXECUTABLE_PATH ||
+      (existsSync(installedChromium) ? installedChromium : undefined);
     const context = await chromium.launchPersistentContext(
-      ".browser-profile/general",
+      ".browser-profile/marketplace",
       {
-        headless: process.env.BROWSER_HEADLESS !== "false",
+        ...(executablePath
+          ? { executablePath }
+          : { channel: process.env.BROWSER_CHANNEL || "chrome" }),
+        headless,
         viewport: { width: 1280, height: 850 },
         reducedMotion: "reduce",
-        serviceWorkers: "block",
-        args: ["--window-size=1300,980"],
+        serviceWorkers: "allow",
+        args: [
+          "--window-size=1300,980",
+          "--disable-crash-reporter",
+          "--disable-crashpad",
+        ],
       },
     );
     generalContext = context;
@@ -338,7 +362,7 @@ export async function warmGeneral() {
       p.setDefaultTimeout(4000);
     });
     generalPage.setDefaultTimeout(4000);
-    await generalPage.goto("https://www.google.com/", {
+    await generalPage.goto("https://www.facebook.com/marketplace/", {
       waitUntil: "domcontentloaded",
       timeout: 12000,
     });
@@ -456,7 +480,7 @@ export async function executeGeneral(
     return state;
   };
   try {
-    send("start", { mode: "cerebras", model: configuration().model });
+    send("start", { mode: configuration().mode, model: configuration().model });
     if (viewedPage && !viewedPage.isClosed()) generalPage = viewedPage;
     page = await warmGeneral();
     // Headless pages all report visible; keep the adopted cart tab in that mode.
@@ -493,8 +517,32 @@ export async function executeGeneral(
       send("inference-start", { call: turn + 1 });
       let queue = Promise.resolve();
       const results: { call: ToolCall; result: unknown }[] = [];
+      const visionImage = await page.screenshot({
+        type: 'jpeg',
+        quality: 72,
+        animations: 'disabled',
+        timeout: 4000,
+      });
       const step = await modelStep(
-        messages,
+        [
+          ...messages,
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Current browser screenshot. Use its pixels for every visual claim; use the latest DOM observation for element IDs.',
+              },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/jpeg;base64,${visionImage.toString('base64')}`,
+                  detail: 'low',
+                },
+              },
+            ],
+          },
+        ],
         (call) => {
           queue = queue
             .then(async () => {
@@ -619,7 +667,7 @@ export async function executeGeneral(
                     await locator.fill(String(args.text ?? ""));
                   } else {
                     if (
-                      !["Enter", "Tab", "Escape", "ArrowDown"].includes(
+                      !["Enter", "Tab", "Escape", "ArrowDown", "ArrowRight"].includes(
                         String(args.key),
                       )
                     )
@@ -714,18 +762,21 @@ export async function executeGeneral(
           content: JSON.stringify(result.result),
         });
       // Keep recent page observations complete, compact older observations to limit prefill.
-      for (let i = 0; i < messages.length - results.length - 2; i++)
+      for (let i = 0; i < messages.length - results.length - 2; i++) {
+        const content = messages[i].content;
         if (
           messages[i].role === "tool" &&
-          (messages[i].content?.length ?? 0) > 2400
+          typeof content === "string" &&
+          content.length > 2400
         )
           try {
-            messages[i].content = JSON.stringify(JSON.parse(messages[i].content!, (key,value)=>{
+            messages[i].content = JSON.stringify(JSON.parse(content, (key,value)=>{
               if(key === "elements" && Array.isArray(value)) return value.filter(item=>item.href && item.href.length<1000).map(item=>({label:item.label,href:item.href})).slice(0,30);
               if(key === "snapshotId") return undefined;
               return value;
             }));
           } catch { /* Keep non-JSON tool responses intact. */ }
+      }
     }
     send("done", {
       summary,
@@ -810,10 +861,9 @@ async function resetBrowserView() {
   await Promise.all([...contexts].filter(context=>context!==generalContext).map(context=>context.close()));
   await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
   tabPages.clear();tabWork.clear();openedPages.clear();
-  void warmRemoteWorkers().catch(()=>{});
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);
-  if(page.url()!=="https://www.google.com/") await page.goto("https://www.google.com/",{waitUntil:"domcontentloaded",timeout:12000});
+  if(!page.url().startsWith("https://www.facebook.com/marketplace")) await page.goto("https://www.facebook.com/marketplace/",{waitUntil:"domcontentloaded",timeout:12000});
 }
 export async function resetGeneralBrowser() {
   if (busy) throw new Error("Wait for the current browser action to finish.");

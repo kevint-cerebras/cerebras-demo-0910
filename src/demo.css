@@ -92,7 +92,7 @@ body {
 }
 .demo-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(330px, 1fr);
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 1fr);
   gap: 18px;
   align-items: stretch;
   height: calc(100vh - 190px);

@@ -13,7 +13,8 @@ import type {
 
 export interface Health {
   status: string;
-  mode: "local" | "cerebras";
+  mode: "local" | "cerebras" | "fireworks";
+  provider: "cerebras" | "fireworks";
   model: string | null;
   configurationIncomplete: boolean;
   browser: {
@@ -174,7 +175,7 @@ export function useDash() {
           runRef.current = event.id as string;
           setMetrics((m) => ({
             ...m,
-            modelCalls: event.mode === "cerebras" ? 1 : 0,
+            modelCalls: event.mode === "local" ? 0 : 1,
             pages: 3,
           }));
           break;
@@ -377,10 +378,10 @@ export function useDash() {
     try {
       const response = await fetch("/api/browser/reset", { method: "POST" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not return to Google.");
+      if (!response.ok) throw new Error(data.error || "Could not return to Marketplace.");
       setBrowserPage(data.page);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not return to Google.");
+      setError(error instanceof Error ? error.message : "Could not return to Marketplace.");
     } finally {
       setResetting(false);
     }

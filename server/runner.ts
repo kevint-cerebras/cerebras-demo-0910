@@ -328,12 +328,12 @@ export class ShoppingRun {
     this.emit("start", {
       id: this.id,
       mode: this.config.mode,
-      model: this.config.mode === "cerebras" ? this.config.model : null,
+      model: this.config.mode === "local" ? null : this.config.model,
     });
     this.stage("task", "running", "Starting your request");
     this.deadline = setTimeout(
-      () => this.cancel("The run exceeded the 45-second limit. Please retry."),
-      45_000,
+      () => this.cancel("The run exceeded the Marketplace time limit. Verified partial results were preserved."),
+      Number(process.env.TASK_TIMEOUT_MS || 180_000),
     );
     try {
       this.emit("browser-mode");
@@ -463,7 +463,7 @@ export class ShoppingRun {
         id: this.id,
         status: this.status,
         mode: this.config.mode,
-        model: this.config.mode === "cerebras" ? this.config.model : null,
+        model: this.config.mode === "local" ? null : this.config.model,
         plan: this.plan,
         quotes: [],
         winner: null,
@@ -480,9 +480,6 @@ export class ShoppingRun {
       ]);
     } finally {
       clearTimeout(this.deadline);
-      void warmBrowser().catch((error) =>
-        console.error("Browser warmup failed:", error.message),
-      );
     }
     return this.result!;
   }

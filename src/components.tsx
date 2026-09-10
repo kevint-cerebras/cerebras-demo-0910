@@ -495,7 +495,7 @@ export function TimingPanel({
   runId: string | null;
   running: boolean;
   elapsed: number;
-  mode: "local" | "cerebras";
+  mode: "local" | "cerebras" | "fireworks";
   clientTiming: { firstEvent: number | null; total: number | null };
   onClose: () => void;
 }) {

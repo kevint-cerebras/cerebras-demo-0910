@@ -157,7 +157,7 @@ export interface RunResult {
   id: string;
   status: "approval" | "blocked" | "cancelled" | "error" | "ordered" | "done";
   summary?: string;
-  mode: "cerebras" | "local";
+  mode: "cerebras" | "fireworks" | "local";
   model: string | null;
   plan: Plan;
   quotes: Quote[];
