@@ -305,7 +305,7 @@ async function inspectMarketplaceListing(
   candidatePage: Page,
   signal: AbortSignal,
   reportInference: (timing: AgentCallTiming) => void,
-  reportAction: (label: string) => void,
+  reportAction: (label: string) => Promise<void>,
 ): Promise<CandidateVerdict> {
   const canonicalURL = candidatePage.url();
   const messages: ChatMessage[] = [{
@@ -357,7 +357,7 @@ async function inspectMarketplaceListing(
             shippingEvidence: String(args.shippingEvidence || "No shipping evidence recorded."),
             reason: String(args.reason || "No reason recorded."),
           };
-          reportAction(`Worker finished: ${verdict.title}`);
+          await reportAction(`Worker finished: ${verdict.title}`);
           return verdict;
         }
         if (call.name === "read_page") {
@@ -391,7 +391,7 @@ async function inspectMarketplaceListing(
         } else {
           throw new Error(`Unsupported worker action: ${call.name}`);
         }
-        reportAction(`Worker ${call.name}`);
+        await reportAction(`Worker ${call.name}`);
       } catch (error) {
         result = { error: error instanceof Error ? friendlyBrowserError(error.message) : "Worker action failed." };
       }
@@ -619,11 +619,14 @@ export async function executeGeneral(
   const messages: ChatMessage[] = [...conversation, { role: "user", content: prompt }];
   const send = (type: string, data: Record<string, unknown> = {}) =>
     emit({ type, id, at: performance.now() - start, ...data });
-  const capture = async (label: string, toolCallId?: string) => {
-    if (page) registerTabs(page);
-    const capturedPage = viewedPage && !viewedPage.isClosed() ? viewedPage : page;
-    if (!capturedPage) return;
-    if (pointer)
+  const capturePage = async (
+    capturedPage: Page,
+    label: string,
+    toolCallId?: string,
+    showPointer = false,
+  ) => {
+    registerTabs(capturedPage);
+    if (showPointer && pointer)
       await capturedPage.evaluate(
         (point) =>
           window.dispatchEvent(
@@ -653,6 +656,29 @@ export async function executeGeneral(
       pages: visited.size,
       tabs: await browserTabs(capturedPage),
     });
+  };
+  const capture = async (label: string, toolCallId?: string) => {
+    if (page) registerTabs(page);
+    const capturedPage = viewedPage && !viewedPage.isClosed() ? viewedPage : page;
+    if (capturedPage) await capturePage(capturedPage, label, toolCallId, true);
+  };
+  // Workers continue concurrently, while these short presentation updates are
+  // serialized so the native window and embedded preview show one real worker.
+  let livePreviewQueue = Promise.resolve();
+  const showWorkerProgress = async (
+    workerPage: Page,
+    label: string,
+    toolCallId?: string,
+  ) => {
+    livePreviewQueue = livePreviewQueue
+      .catch(() => {})
+      .then(async () => {
+        if (workerPage.isClosed()) return;
+        await workerPage.bringToFront();
+        generalPage = workerPage;
+        await capturePage(workerPage, label, toolCallId);
+      });
+    await livePreviewQueue.catch(() => {});
   };
   let lastGroceryPreview = 0;
   const groceries = new GroceryTools(signal, async (activePage, label, duration, category) => {
@@ -788,7 +814,7 @@ export async function executeGeneral(
                   if (urls.length < 2)
                     throw new Error("Choose at least two unique Marketplace listings.");
                   const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
-                  const loaded = await Promise.all(urls.map(async (url) => {
+                  const loaded = await Promise.all(urls.map(async (url, workerIndex) => {
                     const requested = new URL(url);
                     let tab = existingTabs.find((candidate) => {
                       try {
@@ -804,6 +830,7 @@ export async function executeGeneral(
                     tab.setDefaultTimeout(4000);
                     tabWork.set(tab, "loading");
                     try {
+                      await showWorkerProgress(tab, `Worker ${workerIndex + 1} tab opened`, call.id);
                       if (!reused)
                         await tab.goto(url, {
                           waitUntil: "domcontentloaded",
@@ -811,6 +838,8 @@ export async function executeGeneral(
                         });
                       await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
                       tabWork.set(tab, "reading");
+                      const workerTitle = (await tab.title().catch(() => "Marketplace listing")).slice(0, 70);
+                      await showWorkerProgress(tab, `Worker ${workerIndex + 1} loaded: ${workerTitle}`, call.id);
                       const verdict = await inspectMarketplaceListing(
                         tab,
                         signal,
@@ -818,11 +847,14 @@ export async function executeGeneral(
                           timings.push(timing);
                           send("inference", { call: timings.length, timing });
                         },
-                        (label) => send("action", {
-                          label,
-                          actions: ++actions,
-                          status: "done",
-                        }),
+                        async (label) => {
+                          send("action", {
+                            label: `Worker ${workerIndex + 1}: ${label}`,
+                            actions: ++actions,
+                            status: "done",
+                          });
+                          await showWorkerProgress(tab, `Worker ${workerIndex + 1}: ${label}`, call.id);
+                        },
                       );
                       tabWork.set(tab, verdict.status === "blocked" ? "error" : "ready");
                       return {

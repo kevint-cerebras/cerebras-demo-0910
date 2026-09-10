@@ -41,6 +41,8 @@ The fixed brief behind the composer narrows the output to two verified matches a
 
 After Dash collects plausible search-result links, it fans out up to ten independent Qwen workers concurrently. Each worker owns one Facebook Marketplace tab in the shared logged-in context, receives fresh screenshots, clicks through that listing's gallery, verifies open-beak pixels and Sunnyvale shipping, and returns a structured verdict. The parent coordinator gathers every verdict and always calls the final-answer tool with the best two matches or an explicit blocker result.
 
+Worker tabs appear in the Dash tab strip as soon as they are created. While processing continues concurrently, the pop-out browser and embedded preview rotate through individual worker tabs after live gallery, read, and scroll actions; the status line identifies the worker currently on screen.
+
 ## Verification
 
 ```bash
