@@ -39,6 +39,8 @@ My friend Qi is an avid collector of statues of geese. Look for all geese statue
 
 The fixed brief behind the composer narrows the output to two verified matches and requires the final answer to include clickable listing links, prices, locations, photo evidence, and shipping evidence.
 
+After Dash collects plausible search-result links, it may preload up to ten Facebook Marketplace listings concurrently in tabs sharing the logged-in profile. It then switches through those tabs sequentially for screenshot-based photo verification and always calls the final-answer tool after two matches or an unavoidable blocker.
+
 ## Verification
 
 ```bash

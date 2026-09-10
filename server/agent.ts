@@ -569,6 +569,67 @@ export async function executeGeneral(
                     send("action",{label:`${label}: ${remote.url()}`,actions:++actions,status:tabWork.get(remote)==="error"?"error":"done"});
                     page=remote;generalPage=remote;await capture(label,call.id);
                   }, signal);
+                } else if (call.name === "open_listing_tabs") {
+                  const supplied = args.urls;
+                  if (!Array.isArray(supplied) || supplied.length < 2 || supplied.length > 10)
+                    throw new Error("Choose 2–10 Marketplace listing URLs.");
+                  const urls = [...new Set(supplied.map((raw) => {
+                    const url = new URL(safePublicURL(String(raw)));
+                    if (
+                      !/(^|\.)facebook\.com$/i.test(url.hostname) ||
+                      !url.pathname.startsWith("/marketplace/item/")
+                    )
+                      throw new Error("Only Facebook Marketplace listing URLs can be preloaded.");
+                    url.hash = "";
+                    return url.href;
+                  }))];
+                  if (urls.length < 2)
+                    throw new Error("Choose at least two unique Marketplace listings.");
+                  const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
+                  const loaded = await Promise.all(urls.map(async (url) => {
+                    const requested = new URL(url);
+                    let tab = existingTabs.find((candidate) => {
+                      try {
+                        const current = new URL(candidate.url());
+                        return current.origin === requested.origin && current.pathname === requested.pathname;
+                      } catch {
+                        return false;
+                      }
+                    });
+                    const reused = Boolean(tab);
+                    tab ||= await generalContext!.newPage();
+                    registerTabs(tab);
+                    tab.setDefaultTimeout(4000);
+                    tabWork.set(tab, "loading");
+                    try {
+                      if (!reused)
+                        await tab.goto(url, {
+                          waitUntil: "domcontentloaded",
+                          timeout: 12000,
+                        });
+                      await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
+                      const text = await tab.locator("body").innerText({ timeout: 4000 });
+                      tabWork.set(tab, "ready");
+                      return {
+                        url: tab.url(),
+                        title: await tab.title(),
+                        reused,
+                        preview: text.replace(/\n{3,}/g, "\n\n").slice(0, 2400),
+                      };
+                    } catch (error) {
+                      tabWork.set(tab, "error");
+                      return {
+                        url,
+                        reused,
+                        error: error instanceof Error ? friendlyBrowserError(error.message) : "Listing failed to load.",
+                      };
+                    }
+                  }));
+                  value = {
+                    opened: loaded,
+                    next: "Call list_tabs, then switch_tab and visually inspect candidates one at a time. Call finish with the final answer after two matches or a blocker.",
+                  };
+                  await capture(`Preloaded ${urls.length} listing tabs`, call.id);
                 } else if (call.name === "navigate") {
                   const url = safePublicURL(
                     String(args.url),
