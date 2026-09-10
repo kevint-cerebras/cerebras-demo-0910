@@ -101,7 +101,7 @@ test("full slots are never selected and incomplete quotes never win", () => {
   ]);
   assert.equal(winner?.store, "goodmarket");
 });
-test("interim speech extraction recognizes groceries without interpreting actions", () => {
+test("post-submission product hints recognize grocery names", () => {
   assert.deepEqual(
     mentionedKeys("Open the browser and get bananas and oat milk"),
     ["oat-milk", "banana"],

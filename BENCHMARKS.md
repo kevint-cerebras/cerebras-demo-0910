@@ -1,6 +1,10 @@
 # Measured latency
 
-Measured locally on September 9, 2026 with real Cerebras `qwen-3.8-27b` requests and Playwright browser execution. The stores are local sandboxes, so these shopping timings do not represent an external retailer's network or authentication costs.
+The current demo executes only after submission. Partial-transcript execution and general web browsing were removed to reduce model usage and keep the clip focused. Historical speech and Screen Studio results below describe earlier builds. Current submission-only verification is recorded in `artifacts/submission-only-verification.json`; it measured zero partial requests and one model call, with a cart ready in 1,593 ms.
+
+The 1600 × 900 clip check reached a cart in 1,401 ms with 131 browser actions, one model call, and three pages. Its largest action gap was 54 ms; approval and the compact stats were visible without scrolling. A separate UI run took 2,547 ms, including 1,851 ms of provider prefill, so sub-500 ms action gaps are not guaranteed on every run.
+
+Historical runs below were measured locally on September 9, 2026 with real Cerebras `qwen-3.8-27b` requests and Playwright browser execution. The stores are local sandboxes, so these shopping timings do not represent an external retailer's network or authentication costs.
 
 ## Warm shopping runs
 
@@ -39,7 +43,7 @@ Source: `artifacts/speech-120wpm.json`, `speech-150wpm.json`, and `speech-180wpm
 
 A real BBC Good Food recipe lookup completed in 2,584 ms with one model call. In a separate native takeover test, a person-controlled navigation changed the browser from Lisbon to Porto on Wikipedia. The next agent request read the same Porto tab and answered in 920 ms with one model call.
 
-The first full recording rehearsal uncovered a separate transition bug: an adopted shopping tab retained local-only network routing. The code now applies the public-browser resource policy to that tab while preserving private-address restrictions. The original rehearsal video is not a final deliverable because its public-site step failed. The transition has its own regression check in `scripts/verify-browser-transition.ts`.
+The first full recording rehearsal uncovered a separate transition bug: an adopted shopping tab retained local-only network routing. The code now applies the public-browser resource policy to that tab while preserving private-address restrictions. The original rehearsal video is not a final deliverable because its public-site step failed. That transition check was removed with the general-browsing execution path.
 
 ## Measurement boundaries
 

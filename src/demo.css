@@ -1,0 +1,447 @@
+body {
+  background: #f4f5f5;
+  color: #172b24;
+}
+.demo-app {
+  max-width: 1600px;
+  margin: auto;
+  padding: 20px 28px 12px;
+  --serif: "DM Sans", sans-serif;
+  --ink: #172b24;
+  --muted: #6e7973;
+  --border: #dce1de;
+  --paper: #fff;
+}
+.demo-app h1,
+.demo-app h2,
+.demo-app h3 {
+  font-family: "DM Sans", sans-serif;
+  letter-spacing: -0.025em;
+}
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.demo-header > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.demo-header strong {
+  font-size: 22px;
+}
+.demo-header > div > span:not(.dash-mark) {
+  font-size: 13px;
+  color: #65736b;
+}
+.demo-provider {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.demo-composer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: white;
+  border: 1px solid #cbd4ce;
+  border-radius: 9px;
+  padding: 12px 14px;
+}
+.demo-composer textarea {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  resize: none;
+  outline: none;
+  font:
+    500 16px/1.5 "DM Sans",
+    sans-serif;
+  color: #183126;
+}
+.demo-composer textarea::placeholder {
+  color: #52655a;
+  opacity: 1;
+}
+.demo-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: #245c44;
+  color: white;
+  font:
+    600 14px "DM Sans",
+    sans-serif;
+  padding: 12px 20px;
+  cursor: pointer;
+}
+.demo-submit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.demo-input-note {
+  font-size: 11px;
+  color: #78837c;
+  margin: 6px 2px 12px;
+}
+.demo-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(330px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  height: calc(100vh - 190px);
+  min-height: 480px;
+}
+.demo-browser .browser-window {
+  height: 100%;
+}
+.demo-browser .browser-page {
+  height: calc(100% - 75px) !important;
+}
+.demo-assistant .demo-feed {
+  max-height: none;
+  min-height: 0;
+  flex: 1;
+}
+.demo-browser {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #d7dfd9;
+  border-radius: 9px;
+  background: #fff;
+}
+.demo-app .browser-window {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: white;
+  overflow: hidden;
+}
+.demo-app .browser-tabs {
+  height: 40px;
+  background: #f8faf8;
+}
+.demo-app .address-row {
+  display: none;
+}
+.demo-app .browser-page {
+  overflow: hidden;
+}
+.demo-app .browser-placeholder {
+  min-height: 420px;
+  background: #fff;
+}
+.demo-app .placeholder-orbit,
+.demo-app .placeholder-stores,
+.demo-app .traffic-lights {
+  display: none;
+}
+.demo-app .browser-placeholder h3 {
+  font-size: 24px;
+  font-weight: 600;
+}
+.demo-app .browser-placeholder p {
+  font-size: 13px;
+}
+.demo-app .browser-status {
+  height: 35px;
+  font-size: 10px;
+  border-top: 1px solid #e5e9e5;
+}
+.demo-app .replay-button {
+  display: none;
+}
+.demo-stats {
+  position: absolute;
+  bottom: 48px;
+  left: 14px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  background: #19362a;
+  color: #fff;
+  border: 1px solid #325441;
+  border-radius: 8px;
+  padding: 10px 14px;
+  box-shadow: 0 3px 12px #19362a1a;
+  cursor: pointer;
+}
+.demo-stats > strong {
+  font-size: 24px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  min-width: 66px;
+}
+.demo-stats small {
+  font-size: 13px;
+  margin-left: 2px;
+}
+.demo-stats > span {
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  color: #c4d8cb;
+  white-space: nowrap;
+}
+.demo-stats b {
+  font-size: 15px;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+.demo-assistant {
+  min-width: 0;
+  border: 1px solid #d7dfd9;
+  border-radius: 9px;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.demo-panel-title {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e3e8e4;
+  font-size: 13px;
+  font-weight: 600;
+}
+.demo-panel-title small {
+  font-size: 11px;
+  font-weight: 400;
+  color: #688070;
+}
+.demo-feed {
+  padding: 14px 16px;
+  max-height: 690px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.demo-intro h2 {
+  font-size: 21px;
+  margin: 8px 0 12px;
+  font-weight: 600;
+}
+.demo-intro p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #627167;
+}
+.demo-examples {
+  display: grid;
+  gap: 8px;
+  margin: 22px 0;
+}
+.demo-examples button {
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid #e0e5e1;
+  background: #fafcfa;
+  border-radius: 5px;
+  font-size: 12px;
+  color: #365641;
+  cursor: pointer;
+}
+.demo-app .user-request {
+  display: none;
+  background: #f4f7f4;
+  border: 0;
+  border-radius: 5px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.demo-app .user-request > span {
+  font-size: 9px;
+}
+.demo-app .assistant-response-label {
+  display: none;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #64796b;
+  margin: 10px 0;
+}
+.demo-app .assistant-response-label .dash-mark {
+  display: none;
+}
+.demo-app .preferences {
+  margin: 8px 0;
+  gap: 5px;
+}
+.demo-app .preferences span {
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 3px;
+}
+.demo-comparison h3 {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 14px 0 6px;
+}
+.demo-comparison h3 small {
+  font-size: 10px;
+  font-weight: 400;
+  color: #738377;
+}
+.demo-comparison > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 8px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.demo-comparison .selected {
+  background: #edf5ee;
+  color: #245c44;
+}
+.demo-cart h2 {
+  font-size: 21px;
+  font-weight: 650;
+  margin: 17px 0 10px;
+}
+.demo-items {
+  max-height: 185px;
+  overflow: auto;
+}
+.demo-items > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid #f0f2f0;
+}
+.demo-items > div > span:last-child {
+  white-space: nowrap;
+}
+.demo-delivery {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #6a7a6e;
+  padding: 12px 0 8px;
+}
+.demo-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 6px 0 12px;
+  font-size: 12px;
+}
+.demo-total strong {
+  font-size: 25px;
+}
+.demo-app .primary-button {
+  width: 100%;
+  font-size: 13px;
+  background: #245c44;
+  border-radius: 6px;
+  box-shadow: none;
+}
+.demo-fine {
+  font-size: 10px !important;
+  line-height: 1.5;
+  color: #7b887e !important;
+  margin: 9px 0 0;
+}
+.demo-footer {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+  color: #87918a;
+  font-size: 10px;
+}
+.demo-app .approval-modal h2 {
+  font-size: 28px;
+}
+.demo-app .approval-icon,
+.demo-app .approval-modal .eyebrow {
+  display: none;
+}
+.demo-app .modal {
+  border-radius: 10px;
+}
+@media (max-width: 900px) {
+  .demo-workspace {
+    height: auto;
+    min-height: 0;
+  }
+  .demo-browser {
+    height: 500px;
+  }
+}
+@media (max-width: 900px) {
+  .demo-app {
+    padding: 16px;
+  }
+  .demo-workspace {
+    grid-template-columns: 1fr;
+  }
+  .demo-feed {
+    max-height: none;
+  }
+  .demo-header > div > span:not(.dash-mark) {
+    font-size: 11px;
+  }
+  .demo-stats {
+    gap: 12px;
+  }
+  .demo-stats > strong {
+    font-size: 21px;
+  }
+  .demo-composer {
+    gap: 6px;
+  }
+  .demo-composer textarea {
+    font-size: 14px;
+  }
+  .demo-submit {
+    padding: 10px 12px;
+  }
+  .demo-footer {
+    gap: 16px;
+  }
+}
+@media (max-width: 500px) {
+  .demo-header > div:first-child > span:not(.dash-mark) {
+    display: none;
+  }
+  .demo-stats {
+    left: 7px;
+    bottom: 43px;
+    gap: 10px;
+    padding: 9px;
+  }
+  .demo-stats > span {
+    font-size: 8px;
+  }
+  .demo-stats b {
+    font-size: 13px;
+  }
+  .demo-stats > strong {
+    min-width: 57px;
+    font-size: 20px;
+  }
+  .demo-composer {
+    flex-wrap: wrap;
+  }
+  .demo-composer textarea {
+    flex-basis: 100%;
+  }
+  .demo-submit {
+    margin-left: auto;
+  }
+}

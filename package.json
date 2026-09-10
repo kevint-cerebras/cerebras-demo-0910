@@ -13,14 +13,14 @@
     "benchmark:speech": "tsx scripts/speech-benchmark.ts",
     "verify:ui": "tsx scripts/verify-ui.ts",
     "verify:checkout": "tsx scripts/verify-checkout.ts",
-    "verify:transition": "tsx scripts/verify-browser-transition.ts",
-    "record": "tsx scripts/record-demo.ts"
+    "verify:voice": "tsx scripts/speech-benchmark.ts",
+    "record": "tsx scripts/record-demo.ts",
+    "verify:clip": "tsx scripts/verify-clip.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.18",
     "@assistant-ui/react-markdown": "^0.14.14",
     "@fontsource/dm-sans": "^5.3.0",
-    "@fontsource/instrument-serif": "^5.3.0",
     "@vitejs/plugin-react": "^5.0.0",
     "dotenv": "latest",
     "express": "^5.1.0",

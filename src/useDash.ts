@@ -203,7 +203,7 @@ export function useDash() {
     setSnapshots({ ...finalRef.current });
   }, []);
   const run = useCallback(
-    async (text: string, voiceSession?: string) => {
+    async (text: string) => {
       if (text.trim().length < 3) return;
       abortRef.current?.abort();
       stopReplay();
@@ -222,7 +222,7 @@ export function useDash() {
       setMetrics(emptyMetrics());
       setQuotes([]);
       setFoundKeys(new Set());
-      if (!voiceSession) setSnapshots({});
+      setSnapshots({});
       setActiveStore("goodmarket");
       historyRef.current = [];
       finalRef.current = {};
@@ -237,7 +237,6 @@ export function useDash() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: text,
-            ...(voiceSession ? { voiceSession } : {}),
           }),
           signal: controller.signal,
         });
@@ -345,6 +344,7 @@ export function useDash() {
     }
   }, [result]);
   const showPreview = useCallback((shots: BrowserSnapshot[]) => {
+    if (shots.length === 1) setActiveStore(shots[0].store);
     for (const shot of shots) {
       setSnapshots((s) => ({ ...s, [shot.store]: shot }));
     }

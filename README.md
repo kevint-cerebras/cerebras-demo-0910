@@ -1,73 +1,53 @@
 # Dash
 
-A consumer browser assistant demo powered by Cerebras and assistant-ui. Ask for an everyday errand, watch browser work begin, and approve the final cart.
+A focused consumer browser-agent demo. Submit one grocery request; Dash makes a list, searches three stores, validates dietary needs, compares prices, builds a cart, and chooses delivery. The final purchase requires explicit approval.
 
-## Run locally
-
-Requires Node 22 or newer.
+## Run
 
 ```sh
 npm ci
 npm run browser:install
 cp .env.example .env
-# Add your Cerebras key and qwen-3.8-27b model to .env.
+# Set CEREBRAS_API_KEY and CEREBRAS_MODEL=qwen-3.8-27b in .env.
 npm run dev
 ```
 
-Open http://localhost:3100. Wait for the browser to warm before presenting. The server binds to localhost. Credentials stay on the server; `.env`, browser profiles, and test artifacts are ignored by Git.
+Open http://localhost:3100. The assistant shell is task-neutral; shopping details appear in the tool result. The grocery request is prefilled for a short recording. Press Run once. A compact overlay stays visible by default and shows elapsed time, browser actions, model calls, and pages. Click it for the detailed stage timings.
 
-For a production frontend build, run `npm run build`, then `npm start`. To keep worker windows out of a recording, start with `BROWSER_HEADLESS=true npm run dev`. Native takeover requires the default headed mode.
+The server starts three warm Chromium pages. Workers run headless by default. Set `BROWSER_HEADLESS=false` for visible worker windows. The browser belongs to the demo and does not inherit the user's Chrome credentials. The fictional stores need no authentication.
 
-## Demo flow
+Goodmarket, Basket & Co., and Daybreak are functional commerce sandboxes. Their search forms, labels, prices, cart quantities, delivery selectors, and receipts are real DOM elements with working interactions. Products and prices are fictional, and no money is charged.
 
-1. Ask for dairy-free vegetarian tacos for four under $35, delivered tomorrow evening.
-2. Watch three stores searched concurrently while the model streams the shopping list.
-3. Expand the price comparison, inspect the cart and delivery slot, then review and approve the sandbox order.
-4. Start another task and ask Dash to open a public URL, read the page, or find information.
-5. Open the timing overlay to inspect browser work and individual inference calls.
+## Execution
 
-Goodmarket, Basket & Co., and Daybreak are functional local commerce sandboxes. Their search controls, cart buttons, quantities, delivery selectors, and receipts work as ordinary web pages. Product information and prices are fictional. There is no real charge.
+Typing does not invoke the agent. The optional microphone uses the browser's Web Speech API to fill the draft. Finishing dictation does not submit it. There are no partial-transcript model calls; the old live-dictation and general-agent endpoints are disabled.
 
-## Browser ownership
+After submission, one Cerebras inference streams a structured plan and multiple item actions. Code executes independent searches across the three stores concurrently and uses deterministic price, dietary, stock, cart, and delivery logic. Browser execution starts as soon as a complete action is available. Read-only speculative searches may start from obvious grocery hints immediately after submission.
 
-Dash is a separate web application controlling its own Chromium browser. The assistant panel belongs to Dash, not the grocery websites. In headed mode, **Open native browser** lets a person use the real browser tab and continue from that state.
+The browser uses DOM controls, blocks unnecessary resources, and waits for specific DOM conditions rather than network idle. The UI displays actual DOM snapshots. Its decorative cursor does not delay execution. Warmup and task timing are separate.
 
-The general browser has its own persistent profile in `.browser-profile/general`. It does not inherit the user's Google Chrome cookies, logins, extensions, or history. Shopping runs use isolated contexts; their cart can continue into general browsing in the same tab. This demo is a browser assistant, not a desktop-wide assistant or installed extension.
+The assistant-ui external-store runtime provides the composer, messages, tool cards, cancellation, and purchase-approval callback. Only public packages are used.
 
-## What uses assistant-ui
+## Timing
 
-The public `@assistant-ui/react` package provides the external-store runtime, composer, message list, tool-call rendering, cancellation, and tool-approval callback. `@assistant-ui/react-markdown` renders answers. Rich shopping and browser progress are real message tool parts. Approval reaches the backend through the assistant-ui runtime. No unpublished Assistant UI packages are included.
+The detailed overlay records prompt-to-inference, first-token-to-browser-action, navigation, DOM extraction, browser execution, and total task time. Inference includes time to first token, first executable action, provider queue, prefill, generation, and transport/client residual. Thinking is disabled. The residual includes buffering and parsing, so it is not a pure network RTT. Parallel spans overlap and should not be summed as elapsed time.
 
-## Voice
+See [BENCHMARKS.md](BENCHMARKS.md) for measured results. The targets are under 500 ms between visible actions and under ten seconds from submission to cart. Provider latency can cause outliers; the overlay exposes those waits.
 
-Dash uses the browser's Web Speech API with interim results. Use Chrome and allow microphone access when prompted. While speech arrives, deterministic code opens destinations and searches recognized products. These read-only results are reused when the request is submitted. The final list and constraints still pass through Cerebras before cart construction.
+## Verify
 
-The automated speech test injects transcript events at 120, 150, and 180 words per minute through the same recognition lifecycle. It measures transcript-to-browser latency. It does not measure microphone transcription accuracy or audio-to-text latency.
-
-## Execution and timing
-
-The shopping path uses one streamed inference to produce multiple structured actions. Independent store work runs concurrently; dependent actions stay ordered. Browser sessions are warm, unnecessary resources are blocked, and execution waits for specific DOM states rather than `networkidle`. The decorative cursor follows completed actions after about 100 ms and does not gate execution.
-
-General browsing uses streamed native tool calls with versioned DOM element IDs. Actions target observed elements. Sensitive input values are redacted, private destinations are restricted, and consequential website actions stop for human review. This is a bounded demo, not a security-hardened general-purpose browser service.
-
-The overlay separates navigation, DOM extraction, browser execution, model calls, and presentation capture. Inference includes time to first token, time to first executable action, observed streaming duration, provider prefill and generation, queue time, and a transport/client residual. Reasoning is disabled with `reasoning_effort: "none"`. Overlapping measurements should not be added together.
-
-Cerebras is connected directly. Stagehand PR #2907 was reviewed for browser execution and evidence design; Stagehand is not a dependency and its removed Cerebras integration is not used.
-
-## Verification
-
-Run the server first for browser checks.
+Run the server before the browser checks.
 
 ```sh
 npm test
 npm run build
+npm run verify:voice
 npm run verify:ui
+npm run verify:clip
 npm run verify:checkout
-npm run verify:transition
 npm run benchmark
-WPM=180 npm run benchmark:speech
 ```
 
-See [BENCHMARKS.md](BENCHMARKS.md) for measured results and limitations. Raw traces and screenshots are written to `artifacts/`. `npm run record` is a developer capture script using Playwright, distinct from the requested final Screen Studio recording.
+`verify:voice` verifies zero agent calls while typing and dictating, then exactly one inference after submission. `verify:ui` checks the always-visible stats, assistant-ui integration, approval gate, and mobile layout. Artifacts and traces are saved locally under `artifacts/` and ignored by Git, along with `.env` and browser profiles.
 
-Without a configured Cerebras key and model, the supported grocery examples can use a clearly labeled deterministic local planner. General browsing requires Cerebras. Performance claims in the report use real Cerebras calls.
+`npm run build` followed by `npm start` serves the production frontend. Without a configured key and model, supported examples use a clearly labeled local planner. Cerebras measurements require real credentials.

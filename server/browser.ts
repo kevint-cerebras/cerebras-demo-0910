@@ -39,7 +39,7 @@ async function createLease(): Promise<BrowserLease> {
   const timings: BrowserWarmup["pages"] = [];
   if (!browser?.isConnected())
     browser = await chromium.launch({
-      headless: process.env.BROWSER_HEADLESS === "true",
+      headless: process.env.BROWSER_HEADLESS !== "false",
       args: [
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
@@ -89,7 +89,7 @@ async function createLease(): Promise<BrowserLease> {
       return [store.id, page] as const;
     }),
   );
-  if (process.env.BROWSER_HEADLESS !== "true") {
+  if (process.env.BROWSER_HEADLESS === "false") {
     const session = await context.newCDPSession(entries[0][1]);
     try {
       const { windowId } = await session.send("Browser.getWindowForTarget");

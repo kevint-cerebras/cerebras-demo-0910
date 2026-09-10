@@ -2,8 +2,6 @@
 @import "@fontsource/dm-sans/500.css";
 @import "@fontsource/dm-sans/600.css";
 @import "@fontsource/dm-sans/700.css";
-@import "@fontsource/instrument-serif/400.css";
-@import "@fontsource/instrument-serif/400-italic.css";
 :root {
   font-family: "DM Sans", sans-serif;
   color: #303831;
@@ -19,7 +17,7 @@
   --muted: #8b8e82;
   --coral: #ee7453;
   --green: #3b6450;
-  --serif: "Instrument Serif", Georgia, serif;
+  --serif: "DM Sans", sans-serif;
 }
 * {
   box-sizing: border-box;

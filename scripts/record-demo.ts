@@ -42,7 +42,7 @@ const hold = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Powered by Cerebras" }).waitFor();
+  await page.getByRole("status", { name: "Powered by Cerebras" }).waitFor();
   await page.evaluate(() => document.fonts.ready);
   await hold(1200);
   const composer = page.getByLabel("Ask Dash to use the browser");
@@ -53,9 +53,6 @@ try {
     .getByRole("button", { name: "Review & approve" })
     .waitFor({ timeout: 30_000 });
   await hold(1400);
-  await page.locator(".assistant-comparison summary").click();
-  await page.locator(".assistant-comparison").scrollIntoViewIfNeeded();
-  await hold(1800);
   await page.getByRole("button", { name: "Review & approve" }).click();
   await hold(1800);
   await page.getByRole("checkbox").check();
@@ -78,11 +75,6 @@ try {
     .getByRole("button", { name: "New browser task", exact: true })
     .click();
   await hold(800);
-  await page.getByRole("button", { name: /Explore somewhere new/ }).click();
-  await page.locator(".answer-text").waitFor({ timeout: 45_000 });
-  await hold(2000);
-  await page.locator(".assistant-feed").evaluate((el) => (el.scrollTop = 0));
-  await hold(2500);
   await Promise.all(captures);
   if (errors.length) throw new Error(errors.join("\n"));
   await page.screenshot({

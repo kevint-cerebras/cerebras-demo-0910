@@ -13,21 +13,9 @@ import {
   showNativePage,
 } from "./browser";
 import { configuration } from "./planner";
-import {
-  executeGeneral,
-  warmGeneral,
-  closeGeneral,
-  showGeneralBrowser,
-} from "./agent";
+import { showGeneralBrowser } from "./agent";
 import { runs, ShoppingRun } from "./runner";
 import { shopHTML } from "./shop";
-import {
-  claimVoice,
-  cleanupVoice,
-  discardVoice,
-  prepareVoice,
-  previewVoice,
-} from "./voice";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const app = express();
@@ -56,7 +44,7 @@ app.get("/api/health", (_req, res) => {
     configurationIncomplete: config.incomplete,
     browser: {
       ...browserStatus(),
-      native: process.env.BROWSER_HEADLESS !== "true",
+      native: process.env.BROWSER_HEADLESS === "false",
     },
     stores: stores.map((s) => s.shortName),
   });
@@ -71,12 +59,12 @@ app.post("/api/browser/show", async (req, res) => {
     await showNativePage(run.lease.pages[store]);
     return res.json({
       url: run.lease.pages[store].url(),
-      native: process.env.BROWSER_HEADLESS !== "true",
+      native: process.env.BROWSER_HEADLESS === "false",
     });
   }
   res.json({
     ...(await showGeneralBrowser()),
-    native: process.env.BROWSER_HEADLESS !== "true",
+    native: process.env.BROWSER_HEADLESS === "false",
   });
 });
 app.post("/api/warm", async (_req, res) => {
@@ -85,89 +73,43 @@ app.post("/api/warm", async (_req, res) => {
 });
 const runInput = z.object({
   prompt: z.string().trim().min(3).max(2500),
-  voiceSession: z.string().uuid().optional(),
 });
-app.post("/api/agent/run", async (req, res) => {
-  const input = runInput.safeParse(req.body);
-  if (!input.success)
-    return res
-      .status(400)
-      .json({
-        error: "Enter a browser request between 3 and 2,500 characters.",
-      });
-  const controller = new AbortController();
+app.use("/api/agent", (_req, res) =>
   res
-    .status(200)
-    .set({
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-store, no-transform",
-      "X-Accel-Buffering": "no",
-    });
-  res.flushHeaders();
-  res.on("close", () => {
-    if (!res.writableEnded) controller.abort();
-  });
-  const deadline = setTimeout(() => controller.abort(), 60_000);
-  try {
-    await executeGeneral(
-      input.data.prompt,
-      (event) => {
-        if (!res.destroyed && !res.writableEnded)
-          res.write(JSON.stringify(event) + "\n");
-      },
-      controller.signal,
-    );
-  } catch (error) {
-    if (!res.destroyed)
-      res.write(
-        JSON.stringify({
-          type: "error",
-          message:
-            error instanceof Error ? error.message : "Browser task failed.",
-        }) + "\n",
-      );
-  } finally {
-    clearTimeout(deadline);
-    res.end();
-  }
-});
+    .status(410)
+    .json({ error: "This demo uses one submitted grocery request." }),
+);
+app.use("/api/voice", (_req, res) =>
+  res
+    .status(410)
+    .json({
+      error: "Dictation is local to the draft. Submit once to run the agent.",
+    }),
+);
 app.post("/api/run", async (req, res) => {
   const input = runInput.safeParse(req.body);
   if (!input.success)
-    return res
-      .status(400)
-      .json({
-        error: "Enter a grocery request between 3 and 2,500 characters.",
-      });
+    return res.status(400).json({
+      error: "Enter a grocery request between 3 and 2,500 characters.",
+    });
   if (
     [...runs.values()].filter(
       (run) => run.status === "running" || run.status === "approving",
     ).length >= 2
   )
-    return res
-      .status(429)
-      .json({
-        error: "Two errands are already running. Try again in a moment.",
-      });
-  const lease = input.data.voiceSession
-    ? await claimVoice(input.data.voiceSession)
-    : undefined;
-  res
-    .status(200)
-    .set({
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-store, no-transform",
-      "X-Accel-Buffering": "no",
+    return res.status(429).json({
+      error: "Two errands are already running. Try again in a moment.",
     });
+  res.status(200).set({
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-store, no-transform",
+    "X-Accel-Buffering": "no",
+  });
   res.flushHeaders();
-  const run = new ShoppingRun(
-    input.data.prompt,
-    (event) => {
-      if (!res.destroyed && !res.writableEnded)
-        res.write(JSON.stringify(event) + "\n");
-    },
-    lease,
-  );
+  const run = new ShoppingRun(input.data.prompt, (event) => {
+    if (!res.destroyed && !res.writableEnded)
+      res.write(JSON.stringify(event) + "\n");
+  });
   runs.set(run.id, run);
   res.on("close", () => {
     if (!res.writableEnded && run.status === "running") run.cancel();
@@ -189,18 +131,14 @@ app.post("/api/runs/:id/approve", async (req, res) => {
     })
     .safeParse(req.body);
   if (!input.success)
-    return res
-      .status(400)
-      .json({
-        error: "Explicit approval and the reviewed total are required.",
-      });
+    return res.status(400).json({
+      error: "Explicit approval and the reviewed total are required.",
+    });
   const run = runs.get(req.params.id);
   if (!run)
-    return res
-      .status(404)
-      .json({
-        error: "This errand has expired. Run it again to refresh your basket.",
-      });
+    return res.status(404).json({
+      error: "This errand has expired. Run it again to refresh your basket.",
+    });
   try {
     const result = await run.approve(input.data.expectedTotal);
     res.json({
@@ -209,14 +147,12 @@ app.post("/api/runs/:id/approve", async (req, res) => {
         ?.snapshot,
     });
   } catch (error) {
-    res
-      .status(409)
-      .json({
-        error:
-          error instanceof Error
-            ? error.message
-            : "The order could not be confirmed.",
-      });
+    res.status(409).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : "The order could not be confirmed.",
+    });
   }
 });
 app.get("/api/runs/:id/trace", (req, res) => {
@@ -233,21 +169,6 @@ app.get("/api/runs/:id/trace", (req, res) => {
     events: run.events.filter((e) => e.type !== "snapshot"),
     note: "All timings are measured server wall-clock milliseconds. Parallel spans overlap. Local mode is not a Cerebras benchmark. Browser snapshots omitted from export.",
   });
-});
-app.post("/api/voice/prepare", async (_req, res) => {
-  res.json(await prepareVoice());
-});
-app.post("/api/voice/:id/preview", async (req, res) => {
-  const input = z
-    .object({ transcript: z.string().max(2500) })
-    .safeParse(req.body);
-  if (!input.success)
-    return res.status(400).json({ error: "Invalid transcript." });
-  res.json(await previewVoice(req.params.id, input.data.transcript));
-});
-app.delete("/api/voice/:id", async (req, res) => {
-  await discardVoice(req.params.id);
-  res.json({ status: "closed" });
 });
 app.get("/shop/:store", (req, res) => {
   if (!stores.some((s) => s.id === req.params.store))
@@ -279,18 +200,13 @@ app.use(
   ) => {
     if (res.headersSent) return res.end();
     console.error("Request failed:", error.message);
-    res
-      .status(500)
-      .json({
-        error: "Something went wrong preparing the browser. Please retry.",
-      });
+    res.status(500).json({
+      error: "Something went wrong preparing the browser. Please retry.",
+    });
   },
 );
 const server = app.listen(port, hostname, () => {
   console.log(`Dash is running at http://localhost:${port}`);
-  void warmGeneral().catch((error) =>
-    console.error("General browser warmup failed:", error.message),
-  );
   void warmBrowser(`http://${hostname}:${port}`)
     .then(() => console.log("Three browser tabs are warm and ready."))
     .catch((error) =>
@@ -301,7 +217,6 @@ const server = app.listen(port, hostname, () => {
     );
 });
 const cleanup = setInterval(async () => {
-  await cleanupVoice();
   for (const [id, run] of runs)
     if (
       Date.now() - run.created > 30 * 60_000 ||
@@ -315,7 +230,7 @@ cleanup.unref();
 async function shutdown() {
   clearInterval(cleanup);
   server.close();
-  await Promise.all([closeBrowser(), closeGeneral()]);
+  await closeBrowser();
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

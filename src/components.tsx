@@ -135,7 +135,7 @@ export function BrowserView({
           <i />
           <i />
         </div>
-        <div className="tabs" role="tablist" aria-label="Shopping sites">
+        <div className="tabs" role="tablist" aria-label="Browser tabs">
           {stores.map((store) => (
             <button
               role="tab"
@@ -212,8 +212,8 @@ export function BrowserView({
             <h3>{running ? "Already on it." : "Your browser is ready."}</h3>
             <p>
               {running
-                ? "Opening three stores at once."
-                : "Give Dash a list. Watch the rest happen here."}
+                ? "Working in the browser."
+                : "Watch Dash navigate and take action here."}
             </p>
             <div className="placeholder-stores">
               {stores.map((s) => (

@@ -25,7 +25,13 @@ page.on("response", (r) => {
 });
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "Powered by Cerebras" }).waitFor();
+  await page.getByRole("status", { name: "Powered by Cerebras" }).waitFor();
+  assert(
+    await page
+      .getByRole("button", { name: "Development timing overlay" })
+      .isVisible(),
+    "Stats overlay visible before submission",
+  );
   await page.screenshot({
     path: "artifacts/desktop-home.png",
     fullPage: true,
@@ -40,6 +46,7 @@ try {
     .fill(
       "Buy milk, cheese and yogurt for 2. Everything vegan and dairy-free. Under $30, tomorrow morning.",
     );
+  assert.equal(requests, 0, "Typing must not invoke the agent");
   await page.getByLabel("Ask Dash to use the browser").press("Enter");
   await page
     .getByRole("button", { name: "Review & approve" })
@@ -103,6 +110,11 @@ try {
     ),
     false,
     "No horizontal overflow on mobile",
+  );
+  assert.equal(
+    result?.metrics.modelCalls,
+    1,
+    "Exactly one inference per submitted request",
   );
   assert.equal(errors.length, 0, errors.join("\n"));
   writeFileSync(
