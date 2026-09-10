@@ -54,8 +54,10 @@ The first full recording rehearsal uncovered a separate transition bug: an adopt
 
 The functional checks cover dietary substitutions, missing approval, mismatched totals, idempotent checkout, Assistant UI submission and approval, mobile overflow, and page exceptions. Raw results remain in `artifacts/` for inspection.
 
-## Screen Studio rehearsal
+## Screen Studio recording
 
-The live Screen Studio take completed the shopping request in 1.43 seconds with 130 actions and one model call. The public Wikipedia task then completed in 3.93 seconds with three model calls. The editable project is saved in `artifacts/Dash - live browser assistant.screenstudio`.
+The finished editable recording is `artifacts/Dash-demo.screenstudio`. Screen Studio captured the actual Chrome window and live Cerebras execution. The edit is 56 seconds at normal speed, with the setup and stopping footage trimmed and browser controls cropped out.
 
-Frame inspection found a macOS recording-permission dialog covering part of the take. Later frames show the dialog cleared and the public-site task completed. This take is a rehearsal, not a finished video. The Mac locked before a clean retake could begin. Screen Studio export also requires an active license; no subscription was purchased.
+In this take the cart completed in 1.23 seconds with 107 actions and one model call. The subsequent Wikipedia task completed in 3.63 seconds with three model calls. Source frames at 8, 30, and 60 seconds show the opening, purchase approval, and public-site result without a permission dialog covering them. Screen Studio reopened the edited project and displayed a 56-second clip at 1x.
+
+Export is pending Screen Studio activation. No subscription was purchased. Earlier takes remain as rehearsals; `Dash-demo.screenstudio` is the selected take. Verification details and the source hash are in `artifacts/screen-studio-verification.json`.
