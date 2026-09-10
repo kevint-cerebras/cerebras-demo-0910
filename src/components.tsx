@@ -129,29 +129,6 @@ export function BrowserView({
   const latest = [...actions].reverse().find((a) => a.store === activeStore);
   return (
     <section className="browser-window" aria-label="Agent browser">
-      <div className="browser-tabs">
-        <div className="traffic-lights">
-          <i />
-          <i />
-          <i />
-        </div>
-        <div className="tabs" role="tablist" aria-label="Browser tabs">
-          {stores.map((store) => (
-            <button
-              role="tab"
-              aria-selected={activeStore === store.id}
-              className={activeStore === store.id ? "selected" : ""}
-              key={store.id}
-              onClick={() => setActiveStore(store.id)}
-            >
-              <StoreMark store={store.id} size="tiny" />
-              <span>{store.shortName}</span>
-              {running && <span className="tab-working" />}
-            </button>
-          ))}
-        </div>
-        <span className="browser-more">···</span>
-      </div>
       <div className="address-row">
         <div className="browser-nav-icons" aria-hidden="true">
           <ArrowLeft size={14} />
@@ -161,7 +138,7 @@ export function BrowserView({
         <div className="address">
           <LockKeyhole size={10} />
           <span>
-            {activeStore}.sandbox /{" "}
+            {getStore(activeStore).shortName} · localhost /{" "}
             {shot?.label.includes("basket") || shot?.label.includes("Select")
               ? "basket"
               : "groceries"}
@@ -559,20 +536,20 @@ export function TimingPanel({
         </div>
         <div>
           <strong>{metrics.pages}</strong>
-          <span>store pages</span>
+          <span>pages visited</span>
         </div>
         <div>
           <strong>
             {((running ? elapsed : metrics.total) / 1000).toFixed(2)}
             <small>s</small>
           </strong>
-          <span>prompt to cart</span>
+          <span>task time</span>
         </div>
       </div>
       {metrics.inference && (
         <>
           <div className="latency-section-title">
-            INFERENCE · ONE STREAMED PLAN
+            INFERENCE · INITIAL PLAN / ROUTE
           </div>
           <div className="timing-grid">
             <div>
@@ -616,6 +593,57 @@ export function TimingPanel({
           </div>
         </>
       )}
+      {metrics.browserInferenceCalls?.map((call, index) => (
+        <div key={index}>
+          <div className="latency-section-title">
+            BROWSER INFERENCE · CALL {index + 1}
+          </div>
+          <div className="timing-grid">
+            <div>
+              <span>Time to first token</span>
+              <strong>{fmt(call.ttft)}</strong>
+            </div>
+            <div>
+              <span>Time to executable tool call</span>
+              <strong>{fmt(call.firstToolCall)}</strong>
+            </div>
+            <div>
+              <span>Generation · received stream</span>
+              <strong>{fmt(call.generation)}</strong>
+            </div>
+            <div>
+              <span>Generation · provider</span>
+              <strong>{fmt(call.providerGeneration)}</strong>
+            </div>
+            <div>
+              <span>Thinking · disabled</span>
+              <strong>{call.reasoningTokens ?? 0} tokens</strong>
+            </div>
+            <div>
+              <span>Provider prefill</span>
+              <strong>{fmt(call.providerPrompt)}</strong>
+            </div>
+            <div>
+              <span>Provider queue</span>
+              <strong>{fmt(call.providerQueue)}</strong>
+            </div>
+            <div>
+              <span>Transport & client residual</span>
+              <strong>
+                {fmt(
+                  call.providerTotal === null
+                    ? null
+                    : Math.max(0, call.total - call.providerTotal),
+                )}
+              </strong>
+            </div>
+            <div>
+              <span>Full inference request</span>
+              <strong>{fmt(call.total)}</strong>
+            </div>
+          </div>
+        </div>
+      ))}
       <div className="latency-section-title">BROWSER & END-TO-END RESPONSE</div>
       <div className="timing-grid">
         <div>
@@ -680,7 +708,7 @@ export function TimingPanel({
           <p className="timing-footnote">
             Browser startup and page loading happen before the prompt. A warm
             session reuses these pages. {metrics.cacheHits ?? 0} cached DOM
-            searches reused from speech.
+            searches reused during this task.
           </p>
         </details>
       )}

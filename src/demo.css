@@ -129,7 +129,9 @@ body {
   background: #f8faf8;
 }
 .demo-app .address-row {
-  display: none;
+  display: flex;
+  height: 40px;
+  flex-shrink: 0;
 }
 .demo-app .browser-page {
   overflow: hidden;
@@ -159,10 +161,8 @@ body {
   display: none;
 }
 .demo-stats {
-  position: absolute;
-  bottom: 48px;
-  left: 14px;
-  z-index: 4;
+  position: static;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 17px;
@@ -420,8 +420,7 @@ body {
     display: none;
   }
   .demo-stats {
-    left: 7px;
-    bottom: 43px;
+
     gap: 10px;
     padding: 9px;
   }
@@ -445,3 +444,91 @@ body {
     margin-left: auto;
   }
 }
+
+.general-browser {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: white;
+  overflow: hidden;
+}
+.general-address {
+  padding: 13px 16px;
+  background: #f8faf8;
+  border-bottom: 1px solid #e3e8e4;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.general-preview {
+  display: block;
+  width: 100%;
+  min-height: 0;
+  object-fit: contain;
+  object-position: top;
+  flex: 1;
+}
+.general-status {
+  font-size: 11px;
+  color: #6e7973;
+  padding: 10px 14px;
+  border-top: 1px solid #e3e8e4;
+}
+.browser-activity {
+  font-size: 12px;
+  color: #65736b;
+  margin: 16px 0;
+}
+.browser-activity > div {
+  padding: 7px 0;
+  border-bottom: 1px solid #f0f2f0;
+}
+.browser-activity span {
+  color: #245c44;
+  margin-right: 6px;
+}
+.demo-feed .answer-text {
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+@media (max-width: 1000px) {
+  .demo-header { flex-wrap: wrap; gap: 12px; }
+  .demo-header > div:last-child { flex-wrap: wrap; }
+}
+
+html, body, #root { height: 100%; overflow: hidden; }
+.demo-app { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.demo-header { flex-shrink: 0; }
+.demo-thread { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.demo-composer, .demo-input-note, .demo-footer { flex-shrink: 0; }
+.demo-workspace { flex: 1; height: auto; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.demo-browser, .demo-assistant { height: auto; min-height: 0; }
+.general-address, .general-status { flex-shrink: 0; }
+@media (max-width: 900px) {
+  .demo-workspace { grid-template-rows: minmax(0, 3fr) minmax(0, 2fr); }
+}
+
+.interactive-preview { cursor: default; outline-offset: -2px; }
+.interactive-preview:focus-visible { outline: 2px solid #245c44; }
+
+.follow-up-composer { margin-top: 18px; padding: 12px; border: 1px solid #cbd4ce; border-radius: 8px; background: white; }
+.follow-up-composer textarea { display: block; width: 100%; resize: vertical; border: 0; outline: none; color: #172b24; font: inherit; margin-bottom: 10px; }
+.follow-up-composer button { width: 100%; }
+
+.store-comparison { flex-shrink: 0; padding: 10px 12px; border-bottom: 1px solid #dce1de; background: #f8faf8; }
+.store-comparison-heading { font-size: 11px; color: #65736b; margin-bottom: 7px; }
+.store-activity-tabs { display: flex; gap: 8px; }
+.store-activity-tab { flex: 1; min-width: 0; padding: 8px 10px; border: 2px solid #dce1de; border-radius: 7px; background: white; }
+.store-activity-tab.active { border-color: #ed8b36; background: #fff8ed; }
+.store-activity-tab strong { display: block; font-size: 12px; }
+.store-activity-tab span { display: block; font-size: 10px; color: #65736b; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.store-activity-tab[data-store-status="ready"] { border-color: #538565; }
+
+.browser-tab-strip { display: flex; gap: 5px; flex-shrink: 0; overflow-x: auto; padding: 8px 8px 0; background: #edf0ee; }
+.browser-tab { flex: 1 0 120px; max-width: 230px; min-width: 0; text-align: left; padding: 8px 12px; border: 2px solid transparent; border-radius: 8px 8px 0 0; background: #e2e7e3; }
+.browser-tab[aria-selected="true"] { background: white; }
+.browser-tab.working { border-color: #ed8b36; }
+.browser-tab span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.browser-tab small { display: block; color: #68756d; font-size: 10px; margin-top: 3px; }

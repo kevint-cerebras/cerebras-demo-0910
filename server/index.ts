@@ -13,7 +13,15 @@ import {
   showNativePage,
 } from "./browser";
 import { configuration } from "./planner";
-import { showGeneralBrowser } from "./agent";
+import {
+  showGeneralBrowser,
+  warmGeneral,
+  closeGeneral,
+  generalPreview,
+  resetGeneralBrowser,
+  interactGeneralBrowser,
+  selectBrowserTab,
+} from "./agent";
 import { runs, ShoppingRun } from "./runner";
 import { shopHTML } from "./shop";
 
@@ -67,30 +75,54 @@ app.post("/api/browser/show", async (req, res) => {
     native: process.env.BROWSER_HEADLESS === "false",
   });
 });
+app.get("/api/browser/preload", async (_req, res) => {
+  res.json({ page: await generalPreview() });
+});
+app.post("/api/browser/tab", async (req, res) => {
+  if (typeof req.body.id !== "string") return res.status(400).json({error:"Choose a browser tab."});
+  try { res.json({page: await selectBrowserTab(req.body.id)}); }
+  catch(error) {res.status(409).json({error:error instanceof Error?error.message:"Could not switch tabs."});}
+});
+const browserInput = z.discriminatedUnion("type", [
+  z.object({type:z.literal("click"),x:z.number().min(0).max(10000),y:z.number().min(0).max(10000)}),
+  z.object({type:z.literal("scroll"),x:z.number().min(0).max(10000),y:z.number().min(0).max(10000),deltaX:z.number().min(-10000).max(10000),deltaY:z.number().min(-10000).max(10000)}),
+  z.object({type:z.literal("key"),key:z.string().regex(/^(Shift\+)?(Enter|Backspace|Delete|Tab|Escape|ArrowLeft|ArrowRight|ArrowUp|ArrowDown|Home|End|PageUp|PageDown)$/)}),
+  z.object({type:z.literal("text"),text:z.string().max(2500)}),
+]);
+app.post("/api/browser/input", async (req, res) => {
+  const input=browserInput.safeParse(req.body);
+  if(!input.success) return res.status(400).json({error:"Invalid browser input."});
+  try { res.json({page:await interactGeneralBrowser(input.data)}); }
+  catch(error) {res.status(409).json({error:error instanceof Error?error.message:"Browser interaction failed."});}
+});
+app.post("/api/browser/reset", async (_req, res) => {
+  try {
+    res.json({ page: await resetGeneralBrowser() });
+  } catch (error) {
+    res.status(409).json({ error: error instanceof Error ? error.message : "Could not return to Google." });
+  }
+});
 app.post("/api/warm", async (_req, res) => {
   await warmBrowser();
   res.json(browserStatus());
 });
 const runInput = z.object({
   prompt: z.string().trim().min(3).max(2500),
+  previousRunId: z.string().uuid().optional(),
 });
 app.use("/api/agent", (_req, res) =>
-  res
-    .status(410)
-    .json({ error: "This demo uses one submitted grocery request." }),
+  res.status(410).json({ error: "Submit browser tasks through /api/run." }),
 );
 app.use("/api/voice", (_req, res) =>
-  res
-    .status(410)
-    .json({
-      error: "Dictation is local to the draft. Submit once to run the agent.",
-    }),
+  res.status(410).json({
+    error: "Dictation is local to the draft. Submit once to run the agent.",
+  }),
 );
 app.post("/api/run", async (req, res) => {
   const input = runInput.safeParse(req.body);
   if (!input.success)
     return res.status(400).json({
-      error: "Enter a grocery request between 3 and 2,500 characters.",
+      error: "Enter a browser request between 3 and 2,500 characters.",
     });
   if (
     [...runs.values()].filter(
@@ -106,10 +138,15 @@ app.post("/api/run", async (req, res) => {
     "X-Accel-Buffering": "no",
   });
   res.flushHeaders();
+  const previous = input.data.previousRunId ? runs.get(input.data.previousRunId) : undefined;
+  const history = previous ? [...previous.conversation,
+    {role: "user", content: previous.prompt},
+    {role: "assistant", content: previous.result?.summary || "The previous task ended."},
+  ].slice(-20) : [];
   const run = new ShoppingRun(input.data.prompt, (event) => {
     if (!res.destroyed && !res.writableEnded)
       res.write(JSON.stringify(event) + "\n");
-  });
+  }, undefined, history);
   runs.set(run.id, run);
   res.on("close", () => {
     if (!res.writableEnded && run.status === "running") run.cancel();
@@ -143,6 +180,7 @@ app.post("/api/runs/:id/approve", async (req, res) => {
     const result = await run.approve(input.data.expectedTotal);
     res.json({
       result,
+      page: await generalPreview(),
       snapshot: run.events.filter((e) => e.type === "snapshot").at(-1)
         ?.snapshot,
     });
@@ -207,6 +245,9 @@ app.use(
 );
 const server = app.listen(port, hostname, () => {
   console.log(`Dash is running at http://localhost:${port}`);
+  void warmGeneral().catch((error) =>
+    console.error("Browser warmup:", error.message),
+  );
   void warmBrowser(`http://${hostname}:${port}`)
     .then(() => console.log("Three browser tabs are warm and ready."))
     .catch((error) =>
@@ -228,6 +269,7 @@ const cleanup = setInterval(async () => {
 }, 60_000);
 cleanup.unref();
 async function shutdown() {
+  await closeGeneral();
   clearInterval(cleanup);
   server.close();
   await closeBrowser();

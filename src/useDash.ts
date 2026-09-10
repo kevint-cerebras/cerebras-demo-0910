@@ -49,6 +49,18 @@ const emptyMetrics = (): Metrics => ({
   spans: [],
 });
 export function useDash() {
+  const [storeActivity, setStoreActivity] = useState<Record<string, import("../shared/types").StoreActivity>>({});
+  const [browserMode, setBrowserMode] = useState(true);
+  const [browserPage, setBrowserPage] = useState<{
+    image: string;
+    tabs?: import("../shared/types").BrowserTab[];
+    url: string;
+    title: string;
+    label: string;
+  } | null>(null);
+  const [browserActions, setBrowserActions] = useState<
+    { label: string; status: string }[]
+  >([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [running, setRunning] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
@@ -79,6 +91,19 @@ export function useDash() {
   const finalRef = useRef<Partial<Record<StoreId, BrowserSnapshot>>>({});
   const runRef = useRef<string | null>(null);
   const firstEventRef = useRef(false);
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/browser/preload")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!active || !data || startRef.current) return;
+        setBrowserPage(data.page);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
   const refreshHealth = useCallback(async () => {
     try {
       const res = await fetch("/api/health");
@@ -117,6 +142,33 @@ export function useDash() {
         }));
       }
       switch (event.type) {
+        case "browser-mode":
+          setBrowserMode(true);
+          setMetrics((m) => ({ ...m, pages: 0 }));
+          break;
+        case "store-activity": {
+          const activity = event.activity as import("../shared/types").StoreActivity;
+          setStoreActivity(previous=>({...previous,[activity.store]:activity}));
+          break;
+        }
+        case "browser-page":
+          setBrowserPage({
+            image: String(event.image),
+            url: String(event.url),
+            title: String(event.title),
+            label: String(event.label),
+            tabs: event.tabs as import("../shared/types").BrowserTab[] | undefined,
+          });
+          break;
+        case "browser-action":
+          setBrowserActions((a) => [
+            ...a,
+            { label: String(event.label), status: String(event.status) },
+          ]);
+          break;
+        case "browser-metrics":
+          setMetrics(event.metrics as Metrics);
+          break;
         case "start":
           setRunId(event.id as string);
           runRef.current = event.id as string;
@@ -127,6 +179,7 @@ export function useDash() {
           }));
           break;
         case "plan":
+          setBrowserMode(false);
           setMeta(event.meta as Plan["meta"]);
           break;
         case "item":
@@ -203,16 +256,18 @@ export function useDash() {
     setSnapshots({ ...finalRef.current });
   }, []);
   const run = useCallback(
-    async (text: string) => {
+    async (text: string, previousRunId?: string | null) => {
       if (text.trim().length < 3) return;
       abortRef.current?.abort();
-      stopReplay();
+      if (replaying) stopReplay();
       const controller = new AbortController();
       abortRef.current = controller;
       setRunning(true);
       setRunId(null);
       runRef.current = null;
       setPrompt(text);
+      setBrowserActions([]);
+      setStoreActivity({});
       setResult(null);
       setError(null);
       setMeta(null);
@@ -222,7 +277,6 @@ export function useDash() {
       setMetrics(emptyMetrics());
       setQuotes([]);
       setFoundKeys(new Set());
-      setSnapshots({});
       setActiveStore("goodmarket");
       historyRef.current = [];
       finalRef.current = {};
@@ -237,12 +291,13 @@ export function useDash() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             prompt: text,
+            ...(previousRunId ? {previousRunId} : {}),
           }),
           signal: controller.signal,
         });
         if (!response.ok) {
           const data = await response.json();
-          throw new Error(data.error || "The shopping run could not start.");
+          throw new Error(data.error || "The browser task could not start.");
         }
         if (!response.body)
           throw new Error("This browser cannot receive the action stream.");
@@ -264,9 +319,7 @@ export function useDash() {
           }
         }
         if (!sawResult)
-          throw new Error(
-            "The connection ended before the cart was complete. Nothing was ordered.",
-          );
+          throw new Error("The connection ended before the task was complete.");
       } catch (error) {
         if (controller.signal.aborted)
           setError("Stopped. Nothing was ordered.");
@@ -279,7 +332,7 @@ export function useDash() {
         setRunning(false);
       }
     },
-    [handleEvent, stopReplay],
+    [handleEvent, stopReplay, replaying],
   );
   const stop = useCallback(async () => {
     const id = runRef.current;
@@ -288,9 +341,27 @@ export function useDash() {
     abortRef.current?.abort();
     setRunning(false);
   }, []);
-  const reset = useCallback(() => {
+  const selectTab = useCallback(async (id: string) => {
+    const response=await fetch("/api/browser/tab", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
+    const data=await response.json();
+    if(!response.ok) {setError(data.error);return;}
+    setBrowserPage(data.page);
+  }, []);
+  const interactBrowser = useCallback(async (input: import("./InteractivePreview").BrowserInput) => {
+    const response = await fetch("/api/browser/input", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(input)});
+    const data = await response.json();
+    if (!response.ok) { setError(data.error || "Browser interaction failed."); return; }
+    setBrowserPage(data.page);
+  }, []);
+  const [resetting, setResetting] = useState(false);
+  const reset = useCallback(async () => {
+    setResetting(true);
+    setBrowserPage(null);
     stopReplay();
     setPrompt("");
+    setBrowserMode(true);
+    setBrowserActions([]);
+    setStoreActivity({});
     setResult(null);
     setRunId(null);
     setMeta(null);
@@ -302,6 +373,17 @@ export function useDash() {
     setError(null);
     setElapsed(0);
     setQuotes([]);
+    startRef.current = 0;
+    try {
+      const response = await fetch("/api/browser/reset", { method: "POST" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not return to Google.");
+      setBrowserPage(data.page);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not return to Google.");
+    } finally {
+      setResetting(false);
+    }
   }, [stopReplay]);
   const replay = useCallback(() => {
     stopReplay();
@@ -336,6 +418,7 @@ export function useDash() {
     if (!res.ok)
       throw new Error(data.error || "The order could not be confirmed.");
     setResult(data.result as RunResult);
+    if (data.page) setBrowserPage(data.page);
     if (data.snapshot) {
       const shot = data.snapshot as BrowserSnapshot;
       finalRef.current[shot.store] = shot;
@@ -350,6 +433,13 @@ export function useDash() {
     }
   }, []);
   return {
+    resetting,
+    interactBrowser,
+    selectTab,
+    storeActivity,
+    browserMode,
+    browserPage,
+    browserActions,
     health,
     running,
     runId,

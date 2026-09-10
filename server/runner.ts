@@ -1,4 +1,4 @@
-import { adoptGeneralPage } from "./agent";
+import { adoptGeneralPage, executeGeneral } from "./agent";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type { Page } from "playwright";
@@ -23,13 +23,7 @@ import {
   showNativePage,
   type BrowserLease,
 } from "./browser";
-import {
-  configuration,
-  enforceExplicitConstraints,
-  localPlan,
-  mentionedKeys,
-  streamCerebrasPlan,
-} from "./planner";
+import { configuration } from "./planner";
 
 export type Emit = (event: RunEvent) => void;
 export const runs = new Map<string, ShoppingRun>();
@@ -125,6 +119,7 @@ export class ShoppingRun {
     readonly prompt: string,
     emit: Emit,
     private adoptedLease?: BrowserLease,
+    readonly conversation: {role: string; content: string}[] = [],
   ) {
     this.emitter = emit;
   }
@@ -171,7 +166,11 @@ export class ShoppingRun {
   ): Promise<T> {
     this.check();
     const at = this.now();
-    if (this.metrics.firstAction === null) this.metrics.firstAction = at;
+    if (this.metrics.firstAction === null) {
+      this.metrics.firstAction = at;
+      this.metrics.firstActionAfterToken =
+        this.metrics.firstToken === null ? null : at - this.metrics.firstToken;
+    }
     if (
       this.metrics.firstToken !== null &&
       this.metrics.firstActionAfterToken === null
@@ -331,298 +330,125 @@ export class ShoppingRun {
       mode: this.config.mode,
       model: this.config.mode === "cerebras" ? this.config.model : null,
     });
-    this.stage("plan", "running", "Making your shopping list");
-    this.stage("search", "running", "Opening three stores in parallel");
+    this.stage("task", "running", "Starting your request");
     this.deadline = setTimeout(
       () => this.cancel("The run exceeded the 45-second limit. Please retry."),
       45_000,
     );
     try {
-      this.initialized = this.timed(
-        "Acquire warm browser session",
-        "navigation",
-        async () => {
-          this.lease = this.adoptedLease ?? (await acquireBrowser());
-          if (this.abort.signal.aborted) {
-            await this.lease.context.close();
-            this.check();
-          }
-          this.metrics.pages = 3;
-          this.metrics.warmup = this.lease.warmup;
-          if (process.env.BROWSER_HEADLESS !== "true")
-            await showNativePage(this.lease.pages.goodmarket);
-          for (const store of stores) this.searched.set(store.id, new Map());
-          await Promise.all(
-            stores.map((store) =>
-              this.action(
-                store.id,
-                `Open ${store.shortName}`,
-                "dom",
-                async () => {
-                  await this.lease!.pages[store.id].getByRole("textbox", {
-                    name: "Search groceries",
-                  }).focus();
-                },
-                "#search",
-              ),
-            ),
-          );
-        },
-      );
-      // Install a handler immediately; item chains await the same initialization promise.
-      this.initialized.catch(() => {});
-      if (this.config.mode === "local") {
-        const plan = await this.timed(
-          "Local recipe & grocery planner",
-          "planning",
-          async () => localPlan(this.prompt),
-        );
-        this.plan.meta = plan.meta;
-        this.emit("plan", { meta: plan.meta });
-        for (const item of plan.items) this.enqueueItem(item);
-      } else {
-        // Read-only speculative searches start immediately from deterministic grocery/recipe hints.
-        // Model output still defines the final list. Each requested key reuses its search promise.
-        let prefetchKeys = mentionedKeys(this.prompt);
-        try {
-          prefetchKeys = localPlan(this.prompt).items.map((item) => item.key);
-        } catch {
-          /* Unknown requests wait for the model. */
-        }
-        for (const key of prefetchKeys.slice(0, 12))
-          for (const store of stores)
-            this.scheduleSearch(store.id, key).catch(() => {});
-        this.metrics.modelCalls = 1;
-        this.metrics.inferenceStart = this.now();
-        this.metrics.inference = {
-          ttft: null,
-          firstExecutableAction: null,
-          generationStream: null,
-          requestTotal: null,
-          reasoningEnabled: false,
-          reasoningTokens: null,
-          providerQueue: null,
-          providerPrompt: null,
-          providerGeneration: null,
-          providerTotal: null,
-          transportAndClient: null,
-        };
-        let lastContent = 0;
-        await this.timed("Cerebras streaming plan", "model", async () =>
-          streamCerebrasPlan(
-            this.prompt,
-            {
-              onLine: (line) => {
-                if (line.type === "plan") {
-                  this.plan.meta = enforceExplicitConstraints(
-                    line,
-                    this.prompt,
-                  );
-                  this.emit("plan", { meta: this.plan.meta });
-                } else {
-                  if (this.metrics.inference!.firstExecutableAction === null)
-                    this.metrics.inference!.firstExecutableAction =
-                      this.now() - this.metrics.inferenceStart!;
-                  this.enqueueItem(line);
-                }
-              },
-              onFirstToken: () => {
-                this.metrics.firstToken = this.now();
-                this.metrics.inference!.ttft =
-                  this.metrics.firstToken - this.metrics.inferenceStart!;
-                this.emit("first-token", { at: this.metrics.firstToken });
-              },
-              onHeaders: () => {
-                this.metrics.networkHeaders =
-                  this.now() - this.metrics.inferenceStart!;
-                this.emit("network", { headers: this.metrics.networkHeaders });
-              },
-              onContent: () => {
-                lastContent = this.now();
-              },
-              onUsage: (tokens, reasoningTokens) => {
-                this.metrics.tokens = tokens;
-                this.metrics.inference!.reasoningTokens = reasoningTokens;
-              },
-              onProviderTiming: (timing) => {
-                const info = this.metrics.inference!;
-                info.providerQueue =
-                  timing.queue_time == null ? null : timing.queue_time * 1000;
-                info.providerPrompt =
-                  timing.prompt_time == null ? null : timing.prompt_time * 1000;
-                info.providerGeneration =
-                  timing.completion_time == null
+      this.emit("browser-mode");
+      {
+
+        this.metrics.pages = 0;
+        let summary = "";
+        let approvedCart: Quote | null = null;
+        const browserStarted = this.now();
+        await executeGeneral(
+          this.prompt,
+          (event) => {
+            if (event.type === "store-activity") {
+              this.emit("store-activity", {activity: event.activity});
+            } else if (event.type === "page") {
+              const { type: _type, id: _id, at: _at, ...payload } = event;
+              this.metrics.pages = Number(event.pages || this.metrics.pages);
+              this.emit("browser-page", payload);
+            } else if (event.type === "inference-start") {
+              this.metrics.modelCalls = Number(event.call);
+              if (this.metrics.inferenceStart === null) this.metrics.inferenceStart = this.now();
+              this.emit("browser-metrics", {
+                metrics: structuredClone(this.metrics),
+              });
+            } else if (event.type === "inference") {
+              const timing = event.timing as NonNullable<Metrics["browserInferenceCalls"]>[number];
+              if (this.metrics.firstToken === null && timing.ttft !== null)
+                this.metrics.firstToken = this.now() - timing.total + timing.ttft;
+              this.metrics.browserInferenceCalls = [
+                ...(this.metrics.browserInferenceCalls || []),
+                event.timing as NonNullable<
+                  Metrics["browserInferenceCalls"]
+                >[number],
+              ];
+              this.emit("browser-metrics", {
+                metrics: structuredClone(this.metrics),
+              });
+            } else if (event.type === "action") {
+              const at = this.now();
+              if (this.metrics.firstAction === null) {
+                this.metrics.firstAction = at;
+                this.metrics.firstActionAfterToken =
+                  this.metrics.firstToken === null
                     ? null
-                    : timing.completion_time * 1000;
-                info.providerTotal =
-                  timing.total_time == null ? null : timing.total_time * 1000;
-              },
-            },
-            this.abort.signal,
-          ),
-        );
-        this.metrics.inference.requestTotal =
-          this.now() - this.metrics.inferenceStart!;
-        this.metrics.inference.generationStream =
-          this.metrics.firstToken === null
-            ? null
-            : lastContent - this.metrics.firstToken;
-        if (this.metrics.inference.providerTotal !== null)
-          this.metrics.inference.transportAndClient = Math.max(
-            0,
-            this.metrics.inference.requestTotal -
-              this.metrics.inference.providerTotal,
-          );
-        if (this.metrics.tokens !== null && this.metrics.firstToken !== null)
-          this.metrics.tokensPerSecond = Math.round(
-            this.metrics.tokens /
-              Math.max(0.001, (this.now() - this.metrics.firstToken) / 1000),
-          );
-      }
-      this.stage(
-        "plan",
-        "done",
-        `${this.plan.items.length} things on your list`,
-      );
-      await this.initialized;
-      await Promise.all(this.chains.values());
-      await Promise.all(this.itemJobs);
-      this.check();
-      if (this.taskErrors.length) throw this.taskErrors[0];
-      if (!this.plan.items.length)
-        throw new Error(
-          this.plan.meta.notes.join(" ") ||
-            "No groceries were found in this request.",
-        );
-      this.stage("search", "done", "Searched all three stores");
-      this.stage(
-        "validate",
-        "running",
-        "Checking ingredients & dietary labels",
-      );
-      const quotes = await this.timed(
-        "Validate labels & compare complete baskets",
-        "validation",
-        async () => {
-          return Promise.all(
-            stores.map(async (store) => {
-              const items: CartItem[] = [],
-                missing: string[] = [];
-              for (const item of this.plan.items) {
-                const options =
-                  this.searched.get(store.id)!.get(item.key) ?? [];
-                const product = options
-                  .filter(
-                    (p) =>
-                      p.key === item.key && eligible(p, this.plan.meta.diets),
-                  )
-                  .sort((a, b) => a.price - b.price)[0];
-                if (product)
-                  items.push({
-                    product,
-                    quantity: item.quantity,
-                    reason: item.reason,
-                    checked: true,
-                  });
-                else missing.push(catalogLabels[item.key]);
+                    : at - this.metrics.firstToken;
               }
-              const slots = await this.action(
-                store.id,
-                "Read available delivery windows",
-                "dom",
-                () =>
-                  this.lease!.pages[store.id].locator(
-                    "[data-slot]",
-                  ).evaluateAll((els) =>
-                    els.map(
-                      (el) => JSON.parse(el.getAttribute("data-json")!) as Slot,
-                    ),
-                  ),
-                undefined,
-                false,
-              );
-              const slot = chooseSlot(slots, this.plan.meta.delivery);
-              if (!slot) missing.push("Requested delivery window");
-              const subtotal = items.reduce(
-                (sum, item) => sum + item.product.price * item.quantity,
-                0,
-              );
-              const delivery =
-                Math.round(store.deliveryFee * 100) + (slot?.fee ?? 0);
-              return {
-                store: store.id,
-                subtotal,
-                delivery,
-                total: subtotal + delivery,
-                complete: !missing.length,
-                missing,
-                items,
-                slot,
-              } satisfies Quote;
-            }),
-          );
-        },
-      );
-      const winner = compareQuotes(quotes);
-      this.emit("quotes", { quotes, winner: winner?.store ?? null });
-      this.stage(
-        "validate",
-        "done",
-        this.plan.meta.diets.length
-          ? "Dietary labels checked on every item"
-          : "Stock & ingredient labels checked",
-      );
-      this.stage(
-        "compare",
-        "done",
-        winner
-          ? `${getStore(winner.store).shortName} has the best complete basket`
-          : "No store can complete this basket",
-      );
-      const warnings = this.plan.meta.notes.filter((n) =>
-        n.startsWith("UNSUPPORTED:"),
-      );
-      if (!winner)
-        warnings.push(
-          "No store can fulfill every item and the requested delivery window. Try adjusting your list.",
+              if (this.lastAction !== null)
+                this.metrics.maxActionGap = Math.max(
+                  this.metrics.maxActionGap,
+                  at - this.lastAction,
+                );
+              this.lastAction = at;
+              this.metrics.actions = Number(event.actions);
+              this.emit("browser-action", {
+                label: event.label,
+                status: event.status,
+              });
+              this.emit("browser-metrics", {
+                metrics: structuredClone(this.metrics),
+              });
+            } else if (event.type === "error") {
+              throw new Error(String(event.message));
+            } else if (event.type === "done") {
+              const metrics = event.metrics as {
+                pages: number;
+                modelCalls: number;
+                inferenceCalls: NonNullable<Metrics["browserInferenceCalls"]>;
+                spans: {
+                  name: string;
+                  category: string;
+                  start: number;
+                  duration: number;
+                }[];
+              };
+              this.metrics.pages = metrics.pages;
+              this.metrics.modelCalls = metrics.modelCalls;
+              this.metrics.browserInferenceCalls = metrics.inferenceCalls;
+              for (const span of metrics.spans)
+                this.metrics.spans.push({
+                  ...span,
+                  start: browserStarted + span.start,
+                  category:
+                    span.category === "navigation"
+                      ? "navigation"
+                      : span.category === "dom"
+                        ? "dom"
+                        : span.category === "model"
+                          ? "model"
+                          : "browser",
+                });
+              summary = String(event.summary);
+            }
+          },
+          this.abort.signal,
+          ({lease, quote}) => { this.lease = lease; approvedCart = quote; },
+          this.conversation,
         );
-      if (
-        winner &&
-        this.plan.meta.budget !== null &&
-        winner.total > Math.round(this.plan.meta.budget * 100)
-      )
-        warnings.push(
-          `The lowest complete basket is over your $${this.plan.meta.budget} budget. Try a smaller list or a higher budget.`,
-        );
-      if (winner) {
-        this.stage(
-          "cart",
-          "running",
-          `Filling your ${getStore(winner.store).shortName} basket`,
-        );
-        await this.buildCart(winner);
-        this.stage(
-          "cart",
-          "done",
-          `${winner.items.reduce((n, i) => n + i.quantity, 0)} packages in your basket`,
-        );
-        this.stage("delivery", "done", winner.slot!.label);
-        await adoptGeneralPage(this.lease!.pages[winner.store]);
+        this.check();
+        this.status = approvedCart ? "approval" : "done";
+        this.metrics.total = this.now();
+        this.result = {
+          id: this.id,
+          status: this.status,
+          mode: this.config.mode,
+          model: this.config.model,
+          plan: this.plan,
+          quotes: approvedCart ? [approvedCart] : [],
+          winner: approvedCart,
+          warnings: [],
+          summary,
+          metrics: structuredClone(this.metrics),
+        };
+        this.emit("result", { result: this.result });
+        return this.result;
       }
-      this.metrics.total = this.now();
-      this.status = warnings.length ? "blocked" : "approval";
-      this.result = {
-        id: this.id,
-        status: this.status,
-        mode: this.config.mode,
-        model: this.config.mode === "cerebras" ? this.config.model : null,
-        plan: this.plan,
-        quotes,
-        winner,
-        metrics: structuredClone(this.metrics),
-        warnings,
-      };
-      this.emit("result", { result: this.result });
     } catch (error) {
       const cancelled = this.abort.signal.aborted;
       this.status = cancelled ? "cancelled" : "error";
@@ -662,7 +488,7 @@ export class ShoppingRun {
   private async buildCart(quote: Quote) {
     const store = quote.store,
       page = this.lease!.pages[store];
-    if (process.env.BROWSER_HEADLESS !== "true") await showNativePage(page);
+    if (process.env.BROWSER_HEADLESS === "false") await showNativePage(page);
     for (const item of quote.items) {
       await this.action(
         store,
@@ -790,6 +616,7 @@ export class ShoppingRun {
         throw new Error("The store did not return an order receipt.");
       this.status = "ordered";
       this.result.status = "ordered";
+      this.result.summary = "Your sandbox order is confirmed. No payment was taken.";
       this.result.receipt = {
         id: receiptId,
         total: quote.total,

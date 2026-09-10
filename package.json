@@ -15,7 +15,8 @@
     "verify:checkout": "tsx scripts/verify-checkout.ts",
     "verify:voice": "tsx scripts/speech-benchmark.ts",
     "record": "tsx scripts/record-demo.ts",
-    "verify:clip": "tsx scripts/verify-clip.ts"
+    "verify:clip": "tsx scripts/verify-clip.ts",
+    "verify:general": "tsx scripts/verify-general.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.18",

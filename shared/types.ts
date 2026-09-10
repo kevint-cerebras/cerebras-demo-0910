@@ -1,10 +1,6 @@
 export type StoreId = "goodmarket" | "basket" | "daybreak";
 export type Diet =
-  | "vegan"
-  | "vegetarian"
-  | "gluten-free"
-  | "dairy-free"
-  | "nut-free";
+  "vegan" | "vegetarian" | "gluten-free" | "dairy-free" | "nut-free";
 export type DeliveryPreference =
   | "earliest"
   | "today"
@@ -115,6 +111,17 @@ export interface BrowserWarmup {
   }[];
 }
 export interface Metrics {
+  browserInferenceCalls?: {
+    ttft: number | null;
+    firstToolCall: number | null;
+    generation: number | null;
+    total: number;
+    providerQueue: number | null;
+    providerPrompt: number | null;
+    providerGeneration: number | null;
+    providerTotal: number | null;
+    reasoningTokens: number | null;
+  }[];
   inference?: InferenceTiming;
   warmup?: BrowserWarmup;
   cacheHits?: number;
@@ -148,7 +155,8 @@ export interface RunEvent {
 }
 export interface RunResult {
   id: string;
-  status: "approval" | "blocked" | "cancelled" | "error" | "ordered";
+  status: "approval" | "blocked" | "cancelled" | "error" | "ordered" | "done";
+  summary?: string;
   mode: "cerebras" | "local";
   model: string | null;
   plan: Plan;
@@ -158,3 +166,14 @@ export interface RunResult {
   warnings: string[];
   receipt?: { id: string; total: number; store: StoreId; slot: string };
 }
+
+export interface StoreActivity {
+  store: StoreId;
+  name: string;
+  status: "searching" | "checked" | "cart" | "ready" | "error";
+  query?: string;
+  productCount?: number;
+  total?: number;
+}
+
+export interface BrowserTab { id: string; url: string; title: string; active: boolean; }

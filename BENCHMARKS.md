@@ -1,8 +1,10 @@
 # Measured latency
 
-The current demo executes only after submission. Partial-transcript execution and general web browsing were removed to reduce model usage and keep the clip focused. Historical speech and Screen Studio results below describe earlier builds. Current submission-only verification is recorded in `artifacts/submission-only-verification.json`; it measured zero partial requests and one model call, with a cart ready in 1,593 ms.
+The current demo executes only after submission. Partial-transcript execution is disabled. General browsing is available again through the submitted-request router. Historical speech and Screen Studio results below describe earlier builds. Current submission-only verification is recorded in `artifacts/submission-only-verification.json`; it measured zero partial requests and one model call, with a cart ready in 1,593 ms.
 
-The 1600 × 900 clip check reached a cart in 1,401 ms with 131 browser actions, one model call, and three pages. Its largest action gap was 54 ms; approval and the compact stats were visible without scrolling. A separate UI run took 2,547 ms, including 1,851 ms of provider prefill, so sub-500 ms action gaps are not guaranteed on every run.
+With the general router restored, the submission-only grocery test reached a cart in 1,437 ms with one model call and zero partial requests. Public browsing tests reached the Wikipedia sea otter article and answered the request in 2,345 ms with three calls including routing; example.org completed in 666 ms with two calls. These are individual local runs, not percentile guarantees. Details are in `artifacts/general-verification.json`.
+
+Before restoring the general task router, the 1600 × 900 clip check reached a cart in 1,401 ms with 131 browser actions, one model call, and three pages. Its largest action gap was 54 ms; approval and the compact stats were visible without scrolling. A separate UI run took 2,547 ms, including 1,851 ms of provider prefill, so sub-500 ms action gaps are not guaranteed on every run.
 
 Historical runs below were measured locally on September 9, 2026 with real Cerebras `qwen-3.8-27b` requests and Playwright browser execution. The stores are local sandboxes, so these shopping timings do not represent an external retailer's network or authentication costs.
 
@@ -65,3 +67,16 @@ The finished editable recording is `artifacts/Dash-demo.screenstudio`. Screen St
 In this take the cart completed in 1.23 seconds with 107 actions and one model call. The subsequent Wikipedia task completed in 3.63 seconds with three model calls. Source frames at 8, 30, and 60 seconds show the opening, purchase approval, and public-site result without a permission dialog covering them. Screen Studio reopened the edited project and displayed a 56-second clip at 1x.
 
 Export is pending Screen Studio activation. No subscription was purchased. Earlier takes remain as rehearsals; `Dash-demo.screenstudio` is the selected take. Verification details and the source hash are in `artifacts/screen-studio-verification.json`.
+
+
+## Live batched grocery runs, September 10
+
+Prompt: “Get ingredients for dairy-free vegetarian tacos for four, under $35, delivered tomorrow evening.” Cerebras selected the searches and products. Three warm stores were searched concurrently through DOM forms; cart controls and delivery selection were executed live. No recording or replay was used.
+
+| Run | Verified cart | Final answer | Model calls | Largest action gap |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | 2.661 s | 3.195 s | 3 | 1.247 s |
+| 2 | 2.125 s | 2.749 s | 3 | 0.696 s |
+| UI | 2.223 s | 3.496 s | 3 | 1.260 s |
+
+All three carts stayed under $35 and selected tomorrow evening. No purchase was submitted. The UI check verified tool activity precedes the final response and the page does not scroll. The 500 ms action-gap target is not consistently met: model calls account for the longest pauses. Inference request totals were 1.846–2.494 s per task; DOM extraction totaled 88–136 ms and preview captures 126–172 ms. Concurrent spans overlap and must not be summed as wall time. Evidence: `artifacts/tacos-batched-1.ndjson`, `artifacts/tacos-batched-2.ndjson`, and `artifacts/tacos-batched-ui.ndjson`.

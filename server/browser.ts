@@ -134,6 +134,10 @@ export async function acquireBrowser(): Promise<BrowserLease> {
   warmLease = undefined;
   warmReady = false;
   warmGeneration++;
+  // Replenish the spare pages while this task uses its already-warm session.
+  void warmBrowser().catch((error) =>
+    console.error("Browser prewarm:", error.message),
+  );
   return pending;
 }
 export async function closeBrowser() {

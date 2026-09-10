@@ -10,9 +10,11 @@ import { DashMark } from "./components";
 
 export const DashToolContext = createContext<{
   content: ReactNode;
+  approvalContent: ReactNode;
+  archivedTools: Map<string, ReactNode>;
   busy: boolean;
   label: string;
-}>({ content: null, busy: false, label: "" });
+}>({ content: null, approvalContent: null, archivedTools: new Map(), busy: false, label: "" });
 function UserMessage() {
   return (
     <MessagePrimitive.Root
@@ -26,10 +28,12 @@ function UserMessage() {
     </MessagePrimitive.Root>
   );
 }
-function ToolCard(_props: ToolCallMessagePartProps) {
+function ToolCard(props: ToolCallMessagePartProps) {
+  const context = useContext(DashToolContext);
+  const review = props.toolName === "review_and_confirm";
   return (
-    <div className="aui-browser-tool" data-testid="aui-browser-tool">
-      {useContext(DashToolContext).content}
+    <div className={review ? "aui-approval-tool" : "aui-browser-tool"} data-testid={review ? "aui-approval-tool" : "aui-browser-tool"}>
+      {context.archivedTools.has(props.toolCallId) ? context.archivedTools.get(props.toolCallId) : review ? context.approvalContent : context.content}
     </div>
   );
 }
