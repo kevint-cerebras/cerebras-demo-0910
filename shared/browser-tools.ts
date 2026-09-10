@@ -5,6 +5,46 @@ export const browserTools = [
   {
     type: "function",
     function: {
+      name: "open_amazon_product_tabs",
+      description:
+        "Open and inspect 5–10 observed Amazon product URLs concurrently. Each tab gets an independent one-shot vision worker that checks product match, price, availability, and delivery evidence. Returns structured verdicts. Use once after collecting candidate product links.",
+      parameters: {
+        type: "object",
+        properties: {
+          urls: {
+            type: "array",
+            minItems: 5,
+            maxItems: 10,
+            items: { type: "string" },
+          },
+        },
+        required: ["urls"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_amazon_products",
+      description:
+        "Add exactly five previously inspected eligible Amazon product URLs to the cart concurrently, one of each, then open and read the live cart for verification. Use only URLs returned eligible by open_amazon_product_tabs.",
+      parameters: {
+        type: "object",
+        properties: {
+          urls: {
+            type: "array",
+            minItems: 5,
+            maxItems: 5,
+            items: { type: "string" },
+          },
+        },
+        required: ["urls"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "open_listing_tabs",
       description:
         "Open and inspect 2–10 observed Facebook Marketplace listing URLs concurrently. Each tab gets an independent vision worker that checks only the first listing photo plus Sunnyvale shipping evidence. Returns structured verdicts for every candidate. Use this once after collecting promising result links, then immediately call finish when at least two matches are returned.",
@@ -176,7 +216,13 @@ export const browserTools = [
 ] as const;
 
 export const marketplaceBrowserTools = browserTools.filter(
-  (tool) => !['search_groceries', 'build_grocery_cart', 'parallel_browse'].includes(tool.function.name),
+  (tool) => ![
+    'search_groceries',
+    'build_grocery_cart',
+    'parallel_browse',
+    'open_amazon_product_tabs',
+    'add_amazon_products',
+  ].includes(tool.function.name),
 );
 
 export const amazonBrowserTools = browserTools.filter(
@@ -194,7 +240,9 @@ AMAZON SHOPPING BRIEF
 - Shop only on Amazon.com in the United States and follow the product category, item count, price range, and delivery constraints in the private session brief.
 - Optimize for latency: use concise searches, select obvious eligible products, and avoid unnecessary comparison once the requested number of supported products is found.
 - Choose distinct, clearly matching merchandise. Use one-time purchases, not subscriptions, and delivery rather than pickup.
-- Add one of each selected product to the cart unless the user's visible request specifies a different quantity. Verify from the live cart that every selected product and quantity is present; do not claim success from an Add-to-Cart confirmation alone.
+- After a concise Amazon search exposes at least five plausible canonical product links, call open_amazon_product_tabs once with 5–10 candidates. Its independent Qwen vision workers inspect all candidates concurrently. Trust their structured verdicts rather than repeating their work serially.
+- Select exactly five eligible distinct products, then call add_amazon_products once with those five URLs. That tool adds all five concurrently and returns the live cart observation. Do not add the products one at a time.
+- Verify from the returned live cart that every selected product and quantity is present; do not claim success from an Add-to-Cart confirmation alone.
 - Return a concise final answer with clickable product links, titles, item prices, quantities, visible subtotal, and cart verification state. Do not repeat private delivery details.
 
 SAFETY STOP

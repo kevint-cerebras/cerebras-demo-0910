@@ -369,6 +369,98 @@ async function inspectMarketplaceListing(
   await reportAction(`finished: ${verdict.title}`);
   return verdict;
 }
+
+const amazonProductWorkerTools = [{
+  type: "function",
+  function: {
+    name: "finish_product",
+    description: "Return the final structured verdict for this Amazon product.",
+    parameters: {
+      type: "object",
+      properties: {
+        status: { type: "string", enum: ["eligible", "no_match", "blocked"] },
+        title: { type: "string" },
+        price: { type: "string" },
+        availability: { type: "string" },
+        delivery: { type: "string" },
+        url: { type: "string" },
+        evidence: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["status", "title", "price", "availability", "delivery", "url", "evidence", "reason"],
+    },
+  },
+}] as const;
+
+type AmazonProductVerdict = {
+  status: "eligible" | "no_match" | "blocked";
+  title: string;
+  price: string;
+  availability: string;
+  delivery: string;
+  url: string;
+  evidence: string;
+  reason: string;
+};
+
+const amazonProductWorkerSystem = `You are one worker in a parallel Amazon product-inspection pool. Inspect only the product already open in this tab. Use the supplied screenshot and DOM observation to determine whether it matches the user's requested merchandise and every constraint in the private session brief. Verify the visible current price, availability, one-time-purchase status, and delivery eligibility. Reject sponsored noise, unrelated products, subscriptions, unavailable products, and anything outside the private price range. Do not click, navigate, add to cart, check out, or expose private delivery details. Always call finish_product exactly once with a concise structured verdict.`;
+
+async function inspectAmazonProduct(
+  productPage: Page,
+  signal: AbortSignal,
+  reportInference: (timing: AgentCallTiming) => void,
+  reportAction: (label: string) => Promise<void>,
+): Promise<AmazonProductVerdict> {
+  signal.throwIfAborted();
+  const canonicalURL = productPage.url();
+  const observation = await productPage.evaluate(readPageScript);
+  const screenshot = await productPage.screenshot({
+    type: "jpeg",
+    quality: 64,
+    animations: "disabled",
+    timeout: 5000,
+  });
+  await reportAction("captured product");
+  const calls: ToolCall[] = [];
+  const step = await modelStep(
+    [{
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Inspect this Amazon product and return a verdict. Product URL: ${canonicalURL}\nDOM observation: ${JSON.stringify(observation).slice(0, 14000)}`,
+        },
+        {
+          type: "image_url",
+          image_url: { url: `data:image/jpeg;base64,${screenshot.toString("base64")}`, detail: "low" },
+        },
+      ],
+    }],
+    (call) => calls.push(call),
+    signal,
+    false,
+    { system: amazonProductWorkerSystem, tools: amazonProductWorkerTools, maxCompletionTokens: 1000 },
+  );
+  reportInference(step.timing);
+  const call = calls.find((candidate) => candidate.name === "finish_product");
+  if (!call) throw new Error("Amazon worker did not return a product verdict.");
+  const args = call.arguments;
+  const status = String(args.status);
+  if (!["eligible", "no_match", "blocked"].includes(status))
+    throw new Error("Invalid Amazon product status.");
+  const verdict: AmazonProductVerdict = {
+    status: status as AmazonProductVerdict["status"],
+    title: String(args.title || await productPage.title().catch(() => "Unknown product")),
+    price: String(args.price || "Unknown price"),
+    availability: String(args.availability || "Unknown availability"),
+    delivery: String(args.delivery || "Unknown delivery"),
+    url: productPage.url() || canonicalURL,
+    evidence: String(args.evidence || "No evidence recorded."),
+    reason: String(args.reason || "No reason recorded."),
+  };
+  await reportAction(`finished: ${verdict.title}`);
+  return verdict;
+}
 let generalContext: BrowserContext | undefined;
 let generalPage: Page | undefined;
 const tabPages = new Map<string, Page>();
@@ -762,6 +854,139 @@ export async function executeGeneral(
                     send("action",{label:`${label}: ${remote.url()}`,actions:++actions,status:tabWork.get(remote)==="error"?"error":"done"});
                     page=remote;generalPage=remote;await capture(label,call.id);
                   }, signal);
+                } else if (call.name === "open_amazon_product_tabs") {
+                  const supplied = args.urls;
+                  if (!Array.isArray(supplied) || supplied.length < 5 || supplied.length > 10)
+                    throw new Error("Choose 5–10 Amazon product URLs.");
+                  const urls = [...new Set(supplied.map((raw) => {
+                    const url = new URL(safePublicURL(String(raw)));
+                    if (
+                      !/(^|\.)amazon\.com$/i.test(url.hostname) ||
+                      !/(?:\/dp\/|\/gp\/product\/)/i.test(url.pathname)
+                    )
+                      throw new Error("Only canonical Amazon product URLs can be inspected.");
+                    url.hash = "";
+                    return url.href;
+                  }))];
+                  if (urls.length < 5)
+                    throw new Error("Choose at least five unique Amazon products.");
+                  const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
+                  const inspected = await Promise.all(urls.map(async (url, workerIndex) => {
+                    const requested = new URL(url);
+                    let tab = existingTabs.find((candidate) => {
+                      try {
+                        const current = new URL(candidate.url());
+                        return current.origin === requested.origin && current.pathname === requested.pathname;
+                      } catch {
+                        return false;
+                      }
+                    });
+                    const reused = Boolean(tab);
+                    tab ||= await generalContext!.newPage();
+                    registerTabs(tab);
+                    tab.setDefaultTimeout(4000);
+                    tabWork.set(tab, "loading");
+                    try {
+                      await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} tab opened`, call.id);
+                      if (!reused)
+                        await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
+                      await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
+                      tabWork.set(tab, "reading");
+                      const title = (await tab.title().catch(() => "Amazon product")).slice(0, 70);
+                      await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} loaded: ${title}`, call.id);
+                      const verdict = await inspectAmazonProduct(
+                        tab,
+                        signal,
+                        (timing) => {
+                          timings.push(timing);
+                          send("inference", { call: timings.length, timing });
+                        },
+                        async (label) => {
+                          send("action", {
+                            label: `Amazon worker ${workerIndex + 1}: ${label}`,
+                            actions: ++actions,
+                            status: "done",
+                          });
+                          await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1}: ${label}`, call.id);
+                        },
+                      );
+                      tabWork.set(tab, verdict.status === "blocked" ? "error" : "ready");
+                      return { reused, ...verdict };
+                    } catch (error) {
+                      tabWork.set(tab, "error");
+                      return {
+                        url,
+                        reused,
+                        status: "blocked" as const,
+                        error: error instanceof Error ? friendlyBrowserError(error.message) : "Product failed to load.",
+                      };
+                    }
+                  }));
+                  value = {
+                    candidates: inspected,
+                    eligibleCount: inspected.filter((candidate) => candidate.status === "eligible").length,
+                    next: "Choose exactly five eligible distinct products and call add_amazon_products once with their URLs.",
+                  };
+                  await capture(`Processed ${urls.length} Amazon products in parallel`, call.id);
+                } else if (call.name === "add_amazon_products") {
+                  const supplied = args.urls;
+                  if (!Array.isArray(supplied) || supplied.length !== 5)
+                    throw new Error("Choose exactly five eligible Amazon product URLs.");
+                  const urls = [...new Set(supplied.map((raw) => {
+                    const url = new URL(safePublicURL(String(raw)));
+                    if (!/(^|\.)amazon\.com$/i.test(url.hostname) || !/(?:\/dp\/|\/gp\/product\/)/i.test(url.pathname))
+                      throw new Error("Only canonical Amazon product URLs can be added.");
+                    return url.href;
+                  }))];
+                  if (urls.length !== 5) throw new Error("Choose five unique Amazon products.");
+                  const addResults = await Promise.all(urls.map(async (url, workerIndex) => {
+                    const requested = new URL(url);
+                    const tab = generalContext!.pages().find((candidate) => {
+                      try {
+                        const current = new URL(candidate.url());
+                        return current.origin === requested.origin && current.pathname === requested.pathname;
+                      } catch {
+                        return false;
+                      }
+                    });
+                    if (!tab) return { url, added: false, error: "Inspected product tab is no longer open." };
+                    try {
+                      const button = tab.locator(
+                        '#add-to-cart-button, input[name="submit.add-to-cart"], button[name="submit.add-to-cart"]',
+                      ).first();
+                      if (!await button.isVisible().catch(() => false))
+                        throw new Error("No visible one-time Add to Cart control was found.");
+                      await button.click({ timeout: 5000 });
+                      await showWorkerProgress(tab, `Amazon cart worker ${workerIndex + 1}: added product`, call.id);
+                      send("action", {
+                        label: `Amazon cart worker ${workerIndex + 1}: added product`,
+                        actions: ++actions,
+                        status: "done",
+                      });
+                      return { url: tab.url(), added: true };
+                    } catch (error) {
+                      tabWork.set(tab, "error");
+                      return { url, added: false, error: error instanceof Error ? friendlyBrowserError(error.message) : "Add to Cart failed." };
+                    }
+                  }));
+                  const cartPage = await generalContext!.newPage();
+                  registerTabs(cartPage);
+                  tabWork.set(cartPage, "loading");
+                  await cartPage.goto("https://www.amazon.com/gp/cart/view.html", {
+                    waitUntil: "domcontentloaded",
+                    timeout: 12000,
+                  });
+                  page = cartPage;
+                  generalPage = cartPage;
+                  tabWork.set(cartPage, "ready");
+                  const cart = await read();
+                  await showWorkerProgress(cartPage, "Amazon cart verification", call.id);
+                  value = {
+                    additions: addResults,
+                    addedCount: addResults.filter((result) => result.added).length,
+                    cart,
+                    next: "Verify all five selected products in this live cart observation, then call finish with links, prices, subtotal, and any limitation.",
+                  };
                 } else if (call.name === "open_listing_tabs") {
                   const supplied = args.urls;
                   if (!Array.isArray(supplied) || supplied.length < 2 || supplied.length > 10)

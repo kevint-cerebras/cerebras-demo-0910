@@ -31,6 +31,8 @@ npm run marketplace:fireworks
 
 The Amazon mode uses a separate ignored persistent profile at `.browser-profile/amazon`, so Amazon and Facebook sessions do not mix. Dash searches, adds selected products to the cart, verifies the live cart, and returns product links, prices, quantities, and the visible subtotal. Optional demo-specific constraints belong in the ignored `AMAZON_EPHEMERAL_BRIEF` value and are appended to the model instructions at runtime without being returned to the browser UI.
 
+Amazon product research is parallelized: after one search exposes candidate links, Dash opens 5–10 product tabs and gives every tab an independent one-shot Qwen vision worker. Eligible products are returned to the coordinator together, and the five selected Add-to-Cart actions run concurrently before one live cart-verification pass. Worker tabs appear immediately and rotate through the embedded preview as they load, capture, finish, and add products.
+
 Launch with Cerebras:
 
 ```bash
