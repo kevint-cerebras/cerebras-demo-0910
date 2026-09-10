@@ -21,6 +21,8 @@ import {
   resetGeneralBrowser,
   interactGeneralBrowser,
   selectBrowserTab,
+  prepareBrowserPages,
+  warmRemoteWorkers,
 } from "./agent";
 import { runs, ShoppingRun } from "./runner";
 import { shopHTML } from "./shop";
@@ -77,6 +79,12 @@ app.post("/api/browser/show", async (req, res) => {
 });
 app.get("/api/browser/preload", async (_req, res) => {
   res.json({ page: await generalPreview() });
+});
+app.post("/api/browser/prepare", async (req,res)=>{
+  const input=z.object({urls:z.array(z.string().url()).min(1).max(6)}).safeParse(req.body);
+  if(!input.success)return res.status(400).json({error:"Enter 1–6 public page URLs."});
+  try{res.json(await prepareBrowserPages(input.data.urls));}
+  catch(error){res.status(409).json({error:error instanceof Error?error.message:"Preload failed"});}
 });
 app.post("/api/browser/tab", async (req, res) => {
   if (typeof req.body.id !== "string") return res.status(400).json({error:"Choose a browser tab."});
@@ -245,6 +253,7 @@ app.use(
 );
 const server = app.listen(port, hostname, () => {
   console.log(`Dash is running at http://localhost:${port}`);
+  void warmRemoteWorkers().catch(error=>console.error("Worker warmup:",error.message));
   void warmGeneral().catch((error) =>
     console.error("Browser warmup:", error.message),
   );

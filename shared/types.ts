@@ -176,4 +176,4 @@ export interface StoreActivity {
   total?: number;
 }
 
-export interface BrowserTab { id: string; url: string; title: string; active: boolean; }
+export interface BrowserTab { id: string; url: string; title: string; active: boolean; work?: "loading" | "reading" | "ready" | "error"; }

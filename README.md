@@ -57,3 +57,17 @@ npm run benchmark
 
 
 The browser tab strip shows actual open tabs. Click a tab to inspect it; orange outlines indicate live work. After checkout, “What’s next?” opens a follow-up composer in the assistant panel and preserves the current page and conversation. The plus button closes task tabs and starts a new task with one Google tab.
+
+
+## Real website comparison demo
+
+Click **Preload pages** and enter up to six public URLs. Pages load concurrently in independent browser contexts. The banner reports preparation time separately from task time; no model answer is cached. After submission, the `parallel_browse` tool rereads live DOM from relevant pages concurrently. Tabs remain interactive and show loading/reading status.
+
+Example request: “Find me a restaurant that serves a gluten free dish without onions or tomatoes that is in Palo Alto.” Candidate pages for this prepared demo:
+
+- https://www.truefoodkitchen.com/locations/palo-alto/
+- https://www.wildseedsf.com/palo-alto-menus/
+- https://www.asianbox.com/menus/
+- https://www.asianbox.com/location/palo-alto/
+
+These are operator-selected starting pages for the known query. They are not restaurant answers baked into the agent. The same tool accepts other public URLs. Menu omissions do not establish that an ingredient is absent; the answer must identify any restaurant confirmation still needed.

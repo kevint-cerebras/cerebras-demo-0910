@@ -17,7 +17,8 @@
     "record": "tsx scripts/record-demo.ts",
     "verify:clip": "tsx scripts/verify-clip.ts",
     "verify:general": "tsx scripts/verify-general.ts",
-    "verify:cart-retry": "tsx scripts/verify-cart-retry.ts"
+    "verify:cart-retry": "tsx scripts/verify-cart-retry.ts",
+    "verify:real-web": "tsx scripts/verify-real-web.ts"
   },
   "dependencies": {
     "@assistant-ui/react": "^0.15.18",

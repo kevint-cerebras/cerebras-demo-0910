@@ -80,3 +80,14 @@ Prompt: “Get ingredients for dairy-free vegetarian tacos for four, under $35, 
 | UI | 2.223 s | 3.496 s | 3 | 1.260 s |
 
 All three carts stayed under $35 and selected tomorrow evening. No purchase was submitted. The UI check verified tool activity precedes the final response and the page does not scroll. The 500 ms action-gap target is not consistently met: model calls account for the longest pauses. Inference request totals were 1.846–2.494 s per task; DOM extraction totaled 88–136 ms and preview captures 126–172 ms. Concurrent spans overlap and must not be summed as wall time. Evidence: `artifacts/tacos-batched-1.ndjson`, `artifacts/tacos-batched-2.ndjson`, and `artifacts/tacos-batched-ui.ndjson`.
+
+
+## Real restaurant sites, September 10
+
+Known-query preparation used four operator-selected official pages: True Food Kitchen Palo Alto, Wildseed Palo Alto menus, Asian Box menus, and Asian Box Palo Alto location. Each page loaded in an independent browser context. Preparation is explicitly shown outside the request timer; no model answer is precomputed.
+
+- Initial live run: 1.475 s preparation, 3.004 s request, 2 model calls.
+- UI verification: 1.258 s preparation, 2.977 s request, 2 calls. At least three tabs displayed concurrent activity; menu/location links and ingredient uncertainty were visible.
+- Recorded take: 1.341 s preparation, 4.975 s request, 3 calls. The model additionally opened four live pages after submission, including three menu-category pages concurrently. Those navigation spans were about 0.52–0.81 s. The final answer identified a provisional candidate and explicitly left ingredient confirmation unresolved.
+
+The silent 12.64-second recording is `artifacts/recordings/restaurant-live.mp4`, at normal speed. It was fully decoded and visually inspected, including a frame showing three simultaneous orange loading tabs. SHA-256: `da49d7b26a0584f8885c0a981cb6c34da1225894fa981953f6c6e7ea5731ff03`. Trace and provenance are beside the video and excluded from Git.
