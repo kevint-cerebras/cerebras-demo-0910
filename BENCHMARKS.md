@@ -96,3 +96,10 @@ The silent 12.64-second recording is `artifacts/recordings/restaurant-live.mp4`,
 ## No-preload Maps trials
 
 Starting on Google with no prepared query results or restaurant pages, live Maps discovery returned restaurants without a CAPTCHA. It opened place pages and official menus in parallel, but did not finish the ingredient comparison. The initial trial timed out at 45.002 s with 32 model calls. After preserving complete page evidence during conversation compaction and waiting for Maps details to render, a second trial still timed out at 45.016 s with 19 calls. This is not a successful end-to-end benchmark. The full normal-speed second recording is `artifacts/recordings/maps-live-v2.mp4` (52.68 s); its trace and provenance are stored beside it. Browser processes were warm, but no search results or restaurant pages were preloaded.
+
+
+## Completed live Maps take, no preloading
+
+After removing page preparation and adding an explicit stop-on-first-supported-candidate instruction, the restaurant request completed in 10.305 s with six model calls. Maps discovery, place-page inspection, and official menu reads all occurred after submission. The model returned World Wrapps' Satay Wrapp, which the official menu labels gluten-free, and explicitly asked for confirmation of sauce ingredients. It did not claim guaranteed absence of onion or tomato. This meets the finished-flow requirement but is slightly above the original ten-second task target.
+
+The normal-speed recording is `artifacts/recordings/maps-finished.mp4` (17.84 s, 1600×900). The complete trace is `artifacts/recordings/maps-finished-take1.ndjson`; no model responses, search results, or menus were precomputed. The preload button, banner, dialog, and preparation endpoint have been removed.

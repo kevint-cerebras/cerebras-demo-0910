@@ -203,14 +203,11 @@ Environment: The premade grocery store is Goodmarket at http://127.0.0.1:${proce
 let generalContext: BrowserContext | undefined;
 let generalPage: Page | undefined;
 const tabPages = new Map<string, Page>();
-const hiddenPreparedPages = new Set<Page>();
 const tabWork = new Map<Page, "loading" | "reading" | "ready" | "error">();
 let remoteBrowser: Browser | undefined;
 let remoteWarming: Promise<void> | undefined;
 const remotePages: Page[] = [];
-const preparedPages = new Map<string, Page>();
-let explicitlyPreparedURLs: string[] = [];
-let preparation: {count: number; duration: number; at: string} | null = null;
+const openedPages = new Map<string, Page>();
 export async function warmRemoteWorkers() {
   if (remoteWarming) return remoteWarming;
   remoteWarming = (async()=>{
@@ -226,28 +223,27 @@ export async function warmRemoteWorkers() {
   try {await remoteWarming;} finally {remoteWarming=undefined;}
 }
 async function remotePage(url: string) {
-  const cached=preparedPages.get(url);
+  const cached=openedPages.get(url);
   if(cached && !cached.isClosed()) {
     const current=new URL(cached.url()), requested=new URL(url);
     if(current.origin===requested.origin && current.pathname===requested.pathname && [...requested.searchParams].every(([key,value])=>current.searchParams.get(key)===value)) return {page:cached,reused:true};
   }
   await warmRemoteWorkers();
-  let page=remotePages.find(p=>!p.isClosed() && p.url()==="about:blank" && ![...preparedPages.values()].includes(p));
+  let page=remotePages.find(p=>!p.isClosed() && p.url()==="about:blank" && ![...openedPages.values()].includes(p));
   if(!page){
     const context=await remoteBrowser!.newContext({viewport:{width:1280,height:850},reducedMotion:"reduce",serviceWorkers:"block"});
     await context.route("**/*",routeGeneralResource);page=await context.newPage();page.setDefaultTimeout(4000);remotePages.push(page);
   }
-  preparedPages.set(url,page);registerTabs(page);
+  openedPages.set(url,page);registerTabs(page);
   return {page,reused:false};
 }
-async function inspectRemotePages(urls: string[], report: (page: Page, label: string, duration: number, category: string)=>Promise<void>, signal?: AbortSignal, reveal = true) {
+async function inspectRemotePages(urls: string[], report: (page: Page, label: string, duration: number, category: string)=>Promise<void>, signal?: AbortSignal) {
   if(!Array.isArray(urls)||urls.length<1||urls.length>6)throw new Error("Choose 1–6 URLs.");
   const validated=[...new Set(urls.map(url=>safePublicURL(url)))];
   return Promise.all(validated.map(async url=>{
     signal?.throwIfAborted();
     const {page,reused}=await remotePage(url);
-    if (reveal) { hiddenPreparedPages.delete(page); registerTabs(page); }
-    else hiddenPreparedPages.add(page);
+    registerTabs(page);
     const cancelled=()=>{void page.close().catch(()=>{});};
     signal?.addEventListener("abort",cancelled,{once:true});
     try {
@@ -274,35 +270,14 @@ async function inspectRemotePages(urls: string[], report: (page: Page, label: st
     } finally {signal?.removeEventListener("abort",cancelled);}
   }));
 }
-export async function prepareBrowserPages(urls: string[]) {
-  if(busy) throw new Error("Wait for the current task to finish.");
-  busy=true;
-  const start=performance.now();
-  try {
-    const results=await inspectRemotePages(urls,async()=>{},undefined,false);
-    const isVerification = (result: typeof results[number]) => "url" in result && /https:\/\/(?:www\.)?google\.[^/]+\/sorry\//.test(result.url);
-    const verification=results.find(isVerification);
-    const success=results.filter(result=>!("error" in result) && !isVerification(result));
-    explicitlyPreparedURLs=success.map(result=>result.requestedURL);
-    preparation={count:success.length,duration:performance.now()-start,at:new Date().toISOString()};
-    if (verification) {
-      generalPage=preparedPages.get(verification.requestedURL);
-      viewedPage=undefined;
-      if(generalPage) hiddenPreparedPages.delete(generalPage);
-    } else await resetBrowserView();
-    return {page:await generalPreview(),results:results.map(result=>({url:result.requestedURL,actualURL:"url" in result?result.url:undefined,title:"title" in result?result.title:undefined,error:"error" in result?result.error:isVerification(result)?"Google requires a CAPTCHA. Complete it in the browser preview, then preload the search URL again.":undefined})),preparation};
-  } finally {busy=false;}
-}
-
 let viewedPage: Page | undefined;
 function registerTabs(page: Page) {
   for (const tab of page.context().pages())
     if (![...tabPages.values()].includes(tab)) tabPages.set(randomUUID(), tab);
 }
 async function browserTabs(active: Page) {
-  hiddenPreparedPages.delete(active);
   registerTabs(active);
-  return Promise.all([...tabPages.entries()].filter(([,p])=>!p.isClosed() && !hiddenPreparedPages.has(p)).map(async ([id,p])=>({id,url:p.url(),title:await p.title().catch(()=>p.url()),active:p===active,work:tabWork.get(p)})));
+  return Promise.all([...tabPages.entries()].filter(([,p])=>!p.isClosed()).map(async ([id,p])=>({id,url:p.url(),title:await p.title().catch(()=>p.url()),active:p===active,work:tabWork.get(p)})));
 }
 export async function selectBrowserTab(id: string) {
   const page=tabPages.get(id);
@@ -451,7 +426,6 @@ export async function executeGeneral(
       label,
       pages: visited.size,
       tabs: await browserTabs(capturedPage),
-      preparation,
     });
   };
   let lastGroceryPreview = 0;
@@ -506,7 +480,7 @@ export async function executeGeneral(
       actions: ++actions,
       status: "done",
     });
-    if (preparation) messages.push({role:"user",content:`Pages preloaded before submission (${Math.round(preparation.duration)}ms preparation, excluded from task timing): ${JSON.stringify(explicitlyPreparedURLs.filter(url=>!preparedPages.get(url)?.isClosed()))}. Read relevant pages together with parallel_browse; no answers have been precomputed.`});
+
     if (page.url() !== "about:blank") {
       messages.push({
         role: "user",
@@ -826,21 +800,16 @@ export async function generalPreview() {
     title: await page.title(),
     label: "Browser ready",
     tabs: await browserTabs(page),
-    preparation,
   };
 }
 
 async function resetBrowserView() {
   await warmGeneral();
   const page = generalContext!.pages().find(p=>!p.isClosed()) || await generalContext!.newPage();
-  const cached = explicitlyPreparedURLs.map(url=>preparedPages.get(url)).filter((p): p is Page=>Boolean(p && !p.isClosed()));
-  const retainedContexts = new Set(cached.map(p=>p.context()));
   const contexts = new Set([...tabPages.values()].filter(p=>!p.isClosed()).map(p=>p.context()));
-  await Promise.all([...contexts].filter(context=>context!==generalContext && !retainedContexts.has(context)).map(context=>context.close()));
+  await Promise.all([...contexts].filter(context=>context!==generalContext).map(context=>context.close()));
   await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
-  tabPages.clear();tabWork.clear();hiddenPreparedPages.clear();
-  cached.forEach(p=>hiddenPreparedPages.add(p));
-  for(const [url,p] of preparedPages) if(p.isClosed() || !explicitlyPreparedURLs.includes(url)) preparedPages.delete(url);
+  tabPages.clear();tabWork.clear();openedPages.clear();
   void warmRemoteWorkers().catch(()=>{});
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);

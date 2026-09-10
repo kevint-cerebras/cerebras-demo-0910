@@ -53,7 +53,6 @@ export function useDash() {
   const [browserMode, setBrowserMode] = useState(true);
   const [browserPage, setBrowserPage] = useState<{
     image: string;
-    preparation?: {count:number;duration:number;at:string} | null;
     tabs?: import("../shared/types").BrowserTab[];
     url: string;
     title: string;
@@ -94,7 +93,7 @@ export function useDash() {
   const firstEventRef = useRef(false);
   useEffect(() => {
     let active = true;
-    void fetch("/api/browser/preload")
+    void fetch("/api/browser/preview")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (!active || !data || startRef.current) return;
@@ -158,7 +157,6 @@ export function useDash() {
             url: String(event.url),
             title: String(event.title),
             label: String(event.label),
-            preparation: event.preparation as {count:number;duration:number;at:string} | null,
             tabs: event.tabs as import("../shared/types").BrowserTab[] | undefined,
           });
           break;
@@ -343,11 +341,6 @@ export function useDash() {
     abortRef.current?.abort();
     setRunning(false);
   }, []);
-  const preparePages = useCallback(async (urls: string[])=>{
-    const response=await fetch("/api/browser/prepare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({urls})});
-    const data=await response.json();if(!response.ok)throw new Error(data.error || "Preload failed");
-    setBrowserPage(data.page);return data;
-  },[]);
   const selectTab = useCallback(async (id: string) => {
     const response=await fetch("/api/browser/tab", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id})});
     const data=await response.json();
@@ -443,7 +436,6 @@ export function useDash() {
     resetting,
     interactBrowser,
     selectTab,
-    preparePages,
     storeActivity,
     browserMode,
     browserPage,

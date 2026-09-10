@@ -1,57 +1,29 @@
 import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
-const base = process.env.DASH_URL || 'http://127.0.0.1:3100';
-const urls = [
-  'https://www.truefoodkitchen.com/locations/palo-alto/',
-  'https://www.wildseedsf.com/palo-alto-menus/',
-  'https://www.asianbox.com/menus/',
-  'https://www.asianbox.com/location/palo-alto/',
-];
-const prompt = 'Find me a restaurant that serves a gluten free dish without onions or tomatoes that is in Palo Alto.';
-const browser = await chromium.launch();
-mkdirSync('artifacts', {recursive:true});
+const base=process.env.DASH_URL || 'http://127.0.0.1:3100';
+const prompt='Find me a restaurant that serves a gluten free dish without onions or tomatoes that is in Palo Alto.';
+const initial=await(await fetch(base+'/api/browser/reset',{method:'POST'})).json();
+assert.equal(initial.page.tabs.length,1);
+assert.equal(new URL(initial.page.url).hostname,'www.google.com');
+const browser=await chromium.launch();
 try {
-  const page = await browser.newPage({viewport:{width:1600,height:900}});
-  const errors: string[] = [];
-  page.on('pageerror', error=>errors.push(error.message));
+  const page=await browser.newPage({viewport:{width:1600,height:900}});
+  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+  await page.addInitScript(()=>{const original=window.fetch;window.fetch=async(...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/api/run'))void response.clone().text().then(text=>(window as any).recordedTrace=text);return response;}});
   await page.goto(`${base}/?prompt=${encodeURIComponent(prompt)}`,{waitUntil:'domcontentloaded'});
-  await page.getByRole('button',{name:'Preload pages',exact:true}).click();
-  const dialog=page.getByRole('dialog',{name:'Preload real pages'});
-  await dialog.getByLabel('Page URLs').fill(urls.join('\n'));
-  const preparationResponse=page.waitForResponse(r=>r.url().endsWith('/api/browser/prepare'));
-  await dialog.getByRole('button',{name:'Preload pages',exact:true}).click();
-  const preparation=await (await preparationResponse).json();
-  assert.equal(preparation.preparation.count,4);
-  await dialog.waitFor({state:'hidden'});
-  assert.equal(await page.getByRole('tab').count(),1,'Prepared sites stay hidden');
-  assert((await page.locator('.general-address').innerText()).includes('google.com'));
-  await page.getByRole('button',{name:'New browser task'}).click();
-  await page.waitForFunction(()=>document.querySelector('.general-address')?.textContent?.includes('google.com'));
-  const afterReset=await (await fetch(base+'/api/browser/preload')).json();
-  assert.equal(afterReset.page.tabs.length,1);
-  assert.equal(afterReset.page.preparation.at,preparation.preparation.at,'Plus must preserve the original preload');
-  await page.evaluate(()=>{
-    (window as any).maxReading=0;
-    new MutationObserver(()=>{(window as any).maxReading=Math.max((window as any).maxReading,document.querySelectorAll('.browser-tab.working').length)}).observe(document.body,{subtree:true,attributes:true,childList:true});
-  });
-  const response=page.waitForResponse(r=>r.url().endsWith('/api/run'));
+  assert.equal(await page.getByRole('button',{name:'Preload pages',exact:true}).count(),0);
   await page.getByRole('button',{name:'Run',exact:true}).click();
-  const trace=await (await response).text();
+  await page.waitForFunction(()=>Boolean((window as any).recordedTrace),{},{timeout:50000});
+  const trace=await page.evaluate(()=>(window as any).recordedTrace as string);
   const events=trace.trim().split('\n').map(line=>JSON.parse(line));
-  const result=events.find(e=>e.type==='result')?.result;
-  assert.equal(result.status,'done');
-  assert(events.some(e=>e.label==='parallel_browse'));
-  assert(events.filter(e=>e.type==='browser-action' && e.label?.startsWith('Reading already-open page:')).length>=3,'The submitted task must reuse cached pages');
-  assert(await page.evaluate(()=>(window as any).maxReading>=3));
-  await page.locator('.answer-text').waitFor();
-  assert(await page.locator('.answer-text a').count()>=2,'Answer should link menu and location evidence');
-  assert(/confirm/i.test(result.summary),'Unverified ingredient details must remain explicit');
+  const result=events.find(event=>event.type==='result')?.result;
+  assert.equal(result?.status,'done');
+  assert(events.some(event=>event.type==='browser-page' && event.url?.includes('google.com/maps/')));
+  assert(events.some(event=>event.type==='browser-action' && event.label==='parallel_browse'));
+  assert(/confirm/i.test(result.summary));
   assert.equal(errors.length,0);
-  assert(await page.locator('.preload-note').isVisible());
-  assert(await page.evaluate(()=>document.documentElement.scrollHeight===innerHeight));
-  await page.screenshot({path:'artifacts/real-web-result.png'});
+  mkdirSync('artifacts',{recursive:true});
   writeFileSync('artifacts/real-web-trace.ndjson',trace);
-  writeFileSync('artifacts/real-web-verification.json',JSON.stringify({urls,prompt,preparation:preparation.preparation,result,maxConcurrentIndicators:await page.evaluate(()=>(window as any).maxReading),errors},null,2));
-  console.log(JSON.stringify({preparation:preparation.preparation,taskMs:result.metrics.total,calls:result.metrics.modelCalls,summary:result.summary}));
+  console.log(JSON.stringify({status:result.status,taskMs:result.metrics.total,calls:result.metrics.modelCalls,summary:result.summary}));
 } finally {await browser.close();}

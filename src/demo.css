@@ -532,7 +532,3 @@ html, body, #root { height: 100%; overflow: hidden; }
 .browser-tab.working { border-color: #ed8b36; }
 .browser-tab span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .browser-tab small { display: block; color: #68756d; font-size: 10px; margin-top: 3px; }
-
-.preload-button { flex: 0 0 auto; background: transparent; color: #526b5d; font-size: 11px; padding: 8px; }
-.preload-note { flex-shrink: 0; padding: 6px 12px; font-size: 10px; color: #6c6a52; background: #faf7e9; border-bottom: 1px solid #e5e1d1; }
-.preload-urls { width: 100%; margin: 12px 0; padding: 10px; border: 1px solid #dce1de; border-radius: 6px; resize: vertical; }

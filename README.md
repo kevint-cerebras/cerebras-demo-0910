@@ -59,17 +59,10 @@ npm run benchmark
 The browser tab strip shows actual open tabs. Click a tab to inspect it; orange outlines indicate live work. After checkout, “What’s next?” opens a follow-up composer in the assistant panel and preserves the current page and conversation. The plus button closes task tabs and starts a new task with one Google tab.
 
 
-## Real website comparison demo
+## Live restaurant comparison demo
 
-Click **Preload pages** and enter up to six public URLs. Pages load concurrently in independent browser contexts. The banner reports preparation time separately from task time; no model answer is cached. After submission, the `parallel_browse` tool rereads live DOM from relevant pages concurrently. Tabs remain interactive and show loading/reading status.
+The restaurant flow begins with a live Google Maps search after submission. Cerebras chooses candidates from those results, reads place pages and official menus in parallel, and stops when it finds one supported dish. Unlisted sauce or seasoning ingredients remain an explicit confirmation question. Nothing is contacted or booked.
 
-Example request: “Find me a restaurant that serves a gluten free dish without onions or tomatoes that is in Palo Alto.” Candidate pages for this prepared demo:
+There is no page-preload UI or preparation endpoint. Browser processes are warm; search results and restaurant pages are loaded only during the task. The plus button closes task tabs and returns to Google.
 
-- https://www.truefoodkitchen.com/locations/palo-alto/
-- https://www.wildseedsf.com/palo-alto-menus/
-- https://www.asianbox.com/menus/
-- https://www.asianbox.com/location/palo-alto/
-
-These are operator-selected starting pages for the known query. They are not restaurant answers baked into the agent. The same tool accepts other public URLs. Menu omissions do not establish that an ingredient is absent; the answer must identify any restaurant confirmation still needed.
-
-Preloaded pages stay hidden behind the Google homepage until the agent uses them. The plus button clears visible task tabs while retaining explicitly preloaded pages in the background. The preload timing disclosure remains visible.
+Example request: “Find me a restaurant that serves a gluten free dish without onions or tomatoes that is in Palo Alto.” Run `npm run verify:real-web` to exercise the full live flow. `npx tsx scripts/record-maps-live.ts` records it at normal speed. Set `RECORDING_NAME` to choose an output basename under `artifacts/recordings`.

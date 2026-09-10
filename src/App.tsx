@@ -30,10 +30,6 @@ export default function App() {
   const initialPrompt = new URLSearchParams(window.location.search).get("prompt") || examples[0].prompt;
   const [input, setInput] = useState(initialPrompt);
   const [draftUpdate, setDraftUpdate] = useState({ text: initialPrompt });
-  const [prepareOpen, setPrepareOpen] = useState(false);
-  const [prepareURLs, setPrepareURLs] = useState("");
-  const [preparing, setPreparing] = useState(false);
-  const [prepareError, setPrepareError] = useState("");
   const appliedDraft = useRef<typeof draftUpdate | null>(null);
   const replaceDraft = (text: string) => {
     setInput(text);
@@ -60,7 +56,7 @@ export default function App() {
   const toolId = `${task.current}-cart`;
   const elapsed = result ? result.metrics.total : dash.elapsed;
   const submit = (text: string, continuation = false) => {
-    if (submitting.current || dash.running || dash.resetting || preparing || text.trim().length < 3) return;
+    if (submitting.current || dash.running || dash.resetting || text.trim().length < 3) return;
     voice.finish();
     if (continuation && result) {
       archivedTools.current.set(toolId, toolContent);
@@ -141,7 +137,7 @@ export default function App() {
     messages,
     convertMessage: (message) => message,
     isRunning: dash.running,
-    isSendDisabled: voice.listening || dash.resetting || preparing || !dash.health,
+    isSendDisabled: voice.listening || dash.resetting || !dash.health,
     onNew: async (message) =>
       submit(
         message.content
@@ -403,7 +399,7 @@ export default function App() {
                       className="demo-submit"
                       disabled={
                         voice.listening ||
-                        dash.resetting || preparing ||
+                        dash.resetting ||
                         input.trim().length < 3 ||
                         !dash.health
                       }
@@ -432,16 +428,16 @@ export default function App() {
                     <div className="browser-tab-strip" role="tablist" aria-label="Browser tabs">
                       {dash.browserPage?.tabs?.map(tab => {
                         const activity = Object.values(dash.storeActivity).find(s=>tab.url.endsWith(`/shop/${s.store}`));
-                        const activeWork = (dash.running || preparing) && (activity ? ["searching","cart"].includes(activity.status) : tab.work ? ["loading","reading"].includes(tab.work) : tab.active);
+                        const activeWork = (dash.running) && (activity ? ["searching","cart"].includes(activity.status) : tab.work ? ["loading","reading"].includes(tab.work) : tab.active);
                         return <button key={tab.id} role="tab" aria-selected={tab.active} className={`browser-tab ${activeWork ? "working" : ""}`} onClick={()=>void dash.selectTab(tab.id)} title={tab.url}>
                           <span>{tab.title.replace(/ · Grocery sandbox$/, "") || "New tab"}</span>
                           {!activity && tab.work && <small>{tab.work === "ready" ? "Page read" : tab.work === "error" ? "Unavailable" : tab.work === "loading" ? "Loading" : "Reading"}</small>}
                           {activity && <small>{activity.status==="searching" ? "Searching prices" : activity.status==="cart" ? "Building cart" : activity.status==="ready" ? `Cart · ${money(activity.total!)}` : activity.status==="checked" ? "Prices checked" : "Interrupted"}</small>}
                         </button>;
                       })}
-                      <button className="preload-button" onClick={()=>setPrepareOpen(true)} disabled={dash.running || dash.resetting || preparing}>Preload pages</button>
+
                     </div>
-                    {dash.browserPage?.preparation && <div className="preload-note">{dash.browserPage.preparation.count} real pages preloaded · {(dash.browserPage.preparation.duration/1000).toFixed(2)}s loading before submission · excluded from task timer</div>}
+
                     <div className="general-address">
                       {browserPageLabel(dash.browserPage)}
                     </div>
@@ -501,8 +497,8 @@ export default function App() {
                         Review the result before any purchase.
                       </p>
                       <p className="demo-fine">
-                        Local stores are preloaded for this demo. You can also
-                        ask Dash to open other websites.
+                        Search, compare, and explore real websites. You can
+                        take over the browser whenever the agent is idle.
                       </p>
                     </div>
                   )}
@@ -520,13 +516,6 @@ export default function App() {
           <footer className="demo-footer">
             <span>Browser automation · Approval before purchase</span>
           </footer>
-          {prepareOpen && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-label="Preload real pages">
-            <h2>Preload real pages</h2><p>Enter up to six URLs, one per line. Each opens in an independent browser session. The model will read them after you submit your request.</p>
-            <textarea className="preload-urls" aria-label="Page URLs" rows={6} value={prepareURLs} onChange={e=>setPrepareURLs(e.target.value)} placeholder="https://example.org/menu" disabled={preparing}/>
-            {prepareError && <p role="alert">{prepareError}</p>}
-            <button className="primary-button" disabled={preparing || !prepareURLs.trim()} onClick={async()=>{setPreparing(true);setPrepareError("");try{const data=await dash.preparePages(prepareURLs.trim().split(/\s+/));const failures=data.results.filter((r:{error?:string})=>r.error);if(failures.length)setPrepareError(`${failures.length} pages could not load. Successfully loaded pages are available in the tabs.`);else setPrepareOpen(false);}catch(error){setPrepareError(error instanceof Error?error.message:"Preload failed");}finally{setPreparing(false)}}}>{preparing ? "Loading real pages…" : "Preload pages"}</button>
-            <button className="text-button" disabled={preparing} onClick={()=>setPrepareOpen(false)}>Close</button>
-          </section></div>}
           {details && (
             <TimingPanel
               metrics={dash.metrics}
