@@ -62,7 +62,11 @@ test("full slots are never selected and incomplete quotes never win", () => {
   ]);
   assert.equal(winner?.store, "goodmarket");
 });
-import { readPageScript, safePublicURL } from "../shared/browser-tools";
+import {
+  authorizedAmazonPurchaseAction,
+  readPageScript,
+  safePublicURL,
+} from "../shared/browser-tools";
 import { nativeCursorScript } from "../shared/native-cursor";
 test("browser helper scripts are valid JavaScript and private destinations are blocked", () => {
   assert.doesNotThrow(() => new Function(readPageScript));
@@ -72,5 +76,28 @@ test("browser helper scripts are valid JavaScript and private destinations are b
   assert.equal(
     safePublicURL("https://en.wikipedia.org/wiki/Porto"),
     "https://en.wikipedia.org/wiki/Porto",
+  );
+});
+
+test("real order controls require an explicitly authorized Amazon session", () => {
+  assert.equal(
+    authorizedAmazonPurchaseAction("Place your order", "amazon", true),
+    true,
+  );
+  assert.equal(
+    authorizedAmazonPurchaseAction("Proceed to checkout", "amazon", true),
+    true,
+  );
+  assert.equal(
+    authorizedAmazonPurchaseAction("Place your order", "amazon", false),
+    false,
+  );
+  assert.equal(
+    authorizedAmazonPurchaseAction("Place your order", "marketplace", true),
+    false,
+  );
+  assert.equal(
+    authorizedAmazonPurchaseAction("Buy Now", "amazon", true),
+    false,
   );
 });

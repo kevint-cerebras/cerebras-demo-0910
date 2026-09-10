@@ -506,7 +506,9 @@ export default function App() {
                       </p>
                       <p className="demo-fine">
                         {isAmazon
-                          ? "Cart preparation is allowed, but checkout and ordering are blocked. You can take over while the agent is idle."
+                          ? dash.health?.purchaseAuthorized
+                            ? "This local session is authorized to submit the verified order using matching saved checkout details."
+                            : "Cart preparation is allowed, but checkout and ordering are blocked. You can take over while the agent is idle."
                           : "Research is read-only. You can take over the persistent Facebook browser whenever the agent is idle."}
                       </p>
                     </div>
@@ -523,7 +525,11 @@ export default function App() {
             </div>
           </ThreadPrimitive.Root>
           <footer className="demo-footer">
-            <span>{isAmazon ? "Amazon · Cart preparation only" : "Facebook Marketplace · Read-only research"}</span>
+            <span>{isAmazon
+              ? dash.health?.purchaseAuthorized
+                ? "Amazon · Authorized purchase session"
+                : "Amazon · Cart preparation only"
+              : "Facebook Marketplace · Read-only research"}</span>
           </footer>
           {details && (
             <TimingPanel

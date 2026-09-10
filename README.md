@@ -31,6 +31,8 @@ npm run marketplace:fireworks
 
 The Amazon mode uses a separate ignored persistent profile at `.browser-profile/amazon`, so Amazon and Facebook sessions do not mix. Dash searches, adds selected products to the cart, verifies the live cart, and returns product links, prices, quantities, and the visible subtotal. Optional demo-specific constraints belong in the ignored `AMAZON_EPHEMERAL_BRIEF` value and are appended to the model instructions at runtime without being returned to the browser UI.
 
+Real ordering is disabled by default. A specifically authorized local session may set `AMAZON_PURCHASE_AUTHORIZED=true` only in its ignored `.env`. In that mode, after verifying the exact cart and final review, Dash may submit the order using an already-saved payment method and a saved address matching the private destination. It still cannot type credentials, address data, or payment data, and it stops for login, CAPTCHA, OTP, missing/mismatched checkout details, price violations, or an ambiguous final state. The confirmation response omits private address and payment information.
+
 Amazon product research is parallelized: after one search exposes candidate links, Dash opens 5–10 product tabs and gives every tab an independent one-shot Qwen vision worker. Eligible products are returned to the coordinator together, and the five selected Add-to-Cart actions run concurrently before one live cart-verification pass. Worker tabs appear immediately and rotate through the embedded preview as they load, capture, finish, and add products.
 
 Launch with Cerebras:

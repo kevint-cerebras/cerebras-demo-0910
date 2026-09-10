@@ -35,6 +35,8 @@ export function configuration() {
   ).replace(/\/$/, '');
   const amazonBrief =
     process.env.AMAZON_EPHEMERAL_BRIEF || file.AMAZON_EPHEMERAL_BRIEF || '';
+  const amazonPurchaseAuthorized =
+    (process.env.AMAZON_PURCHASE_AUTHORIZED || file.AMAZON_PURCHASE_AUTHORIZED || "false").toLowerCase() === "true";
   return {
     key,
     model,
@@ -42,6 +44,7 @@ export function configuration() {
     provider,
     demo,
     amazonBrief,
+    amazonPurchaseAuthorized,
     mode: key && model ? provider : ('local' as const),
     incomplete: Boolean(key) !== Boolean(model),
   };

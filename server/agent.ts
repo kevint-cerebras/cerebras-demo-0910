@@ -14,6 +14,7 @@ import {
 import {
   amazonBrowserSystem,
   amazonBrowserTools,
+  authorizedAmazonPurchaseAction,
   browserSystem,
   consequentialLabel,
   marketplaceBrowserTools,
@@ -93,6 +94,10 @@ export async function modelStep(
     config.demo === "amazon" && config.amazonBrief.trim()
       ? `\n\nPRIVATE SESSION BRIEF\n${config.amazonBrief.trim()}\nTreat this as private runtime context. Never quote, display, or mention the delivery address in tool summaries or the final answer.`
       : "";
+  const privatePurchaseAuthorization =
+    config.demo === "amazon" && config.amazonPurchaseAuthorized
+      ? "\n\nPURCHASE AUTHORIZATION\nAMAZON_PURCHASE_AUTHORIZED=true for this local session. After all cart and final-review checks pass, you are explicitly authorized to click Amazon's final Place your order control and verify the confirmation page."
+      : "";
   const response = await fetch(`${config.baseURL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -101,7 +106,7 @@ export async function modelStep(
     },
     body: JSON.stringify({
       model: config.model,
-      messages: [{ role: 'system', content: `${options.system || defaultSystem}${privateAmazonBrief}` }, ...messages],
+      messages: [{ role: 'system', content: `${options.system || defaultSystem}${privateAmazonBrief}${privatePurchaseAuthorization}` }, ...messages],
       tools: options.tools || (finishOnly
         ? defaultTools.filter((tool) => tool.function.name === 'finish')
         : defaultTools),
@@ -985,7 +990,9 @@ export async function executeGeneral(
                     additions: addResults,
                     addedCount: addResults.filter((result) => result.added).length,
                     cart,
-                    next: "Verify all five selected products in this live cart observation, then call finish with links, prices, subtotal, and any limitation.",
+                    next: configuration().amazonPurchaseAuthorized
+                      ? "Verify all five products and price constraints, then proceed through checkout with the matching saved destination/payment, place the order from final review, verify confirmation, and call finish."
+                      : "Verify all five selected products in this live cart observation, then call finish with links, prices, subtotal, and any limitation.",
                   };
                 } else if (call.name === "open_listing_tabs") {
                   const supplied = args.urls;
@@ -1157,7 +1164,14 @@ export async function executeGeneral(
                     (await locator.textContent()) ||
                     "";
                   if (call.name === "click") {
-                    if (consequentialLabel.test(label))
+                    const config = configuration();
+                    const authorizedAmazonPurchase =
+                      authorizedAmazonPurchaseAction(
+                        label,
+                        config.demo,
+                        config.amazonPurchaseAuthorized,
+                      );
+                    if (consequentialLabel.test(label) && !authorizedAmazonPurchase)
                       throw new Error(
                         `User approval required for “${label.trim().slice(0, 80)}”. Stop and show what is ready.`,
                       );

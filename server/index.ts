@@ -49,6 +49,7 @@ app.get("/api/health", (_req, res) => {
     model: config.mode === "local" ? null : config.model,
     provider: config.provider,
     demo: config.demo,
+    purchaseAuthorized: config.demo === "amazon" && config.amazonPurchaseAuthorized,
     configurationIncomplete: config.incomplete,
     browser: {
       ...browserStatus(),
