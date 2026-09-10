@@ -246,11 +246,11 @@ app.use(
 );
 const server = app.listen(port, hostname, () => {
   console.log(`Dash is running at http://localhost:${port}`);
-  void warmRemoteWorkers().catch(error=>console.error("Worker warmup:",error.message));
+  if (process.env.WARM_REMOTE_WORKERS !== "false") void warmRemoteWorkers().catch(error=>console.error("Worker warmup:",error.message));
   void warmGeneral().catch((error) =>
     console.error("Browser warmup:", error.message),
   );
-  void warmBrowser(`http://${hostname}:${port}`)
+  if (process.env.WARM_GROCERY_BROWSER !== "false") void warmBrowser(`http://${hostname}:${port}`)
     .then(() => console.log("Three browser tabs are warm and ready."))
     .catch((error) =>
       console.error(

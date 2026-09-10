@@ -318,9 +318,10 @@ export async function warmGeneral() {
     return generalPage;
   }
   warming = (async () => {
-    mkdirSync(".browser-profile/general", { recursive: true });
+    const profileDirectory = process.env.BROWSER_PROFILE_DIR || ".browser-profile/general";
+    mkdirSync(profileDirectory, { recursive: true });
     const context = await chromium.launchPersistentContext(
-      ".browser-profile/general",
+      profileDirectory,
       {
         headless: process.env.BROWSER_HEADLESS !== "false",
         viewport: { width: 1280, height: 850 },
@@ -810,7 +811,7 @@ async function resetBrowserView() {
   await Promise.all([...contexts].filter(context=>context!==generalContext).map(context=>context.close()));
   await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
   tabPages.clear();tabWork.clear();openedPages.clear();
-  void warmRemoteWorkers().catch(()=>{});
+  if (process.env.WARM_REMOTE_WORKERS !== "false") void warmRemoteWorkers().catch(()=>{});
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);
   if(page.url()!=="https://www.google.com/") await page.goto("https://www.google.com/",{waitUntil:"domcontentloaded",timeout:12000});
