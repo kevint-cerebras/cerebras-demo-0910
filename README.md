@@ -27,7 +27,7 @@ npm run marketplace:cerebras
 npm run marketplace:fireworks
 ```
 
-Open [http://localhost:3100](http://localhost:3100). Before submitting the demo prompt, use the interactive browser preview to log into Facebook if needed. Do not run both provider commands at once; both use port 3100 and the same persistent browser profile.
+The launcher opens the Dash controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive browser preview or pop-out target browser to log into Facebook if needed. The target browser does not initiate a run by itself: type the request in the Dash controller and press **Run**. Do not run both provider commands at once; both use port 3100 and the same persistent browser profile.
 
 The default embedded browser runs headlessly at the process level but is visible and interactive in Dash. To request a separate native window from a normal macOS Terminal, run with `BROWSER_HEADLESS=false`.
 
