@@ -21,10 +21,12 @@ try {
   await page.getByRole('tab',{name:/Google/}).waitFor();
   await page.evaluate(()=>document.fonts.ready);await hold(1900);
   await page.getByRole('button',{name:'Run',exact:true}).click();
+  await page.waitForFunction(expected => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Ask Dash to use the browser"]')?.value === expected, prompt);
   await page.waitForFunction(()=>Boolean((window as any).recordedTrace),{},{timeout:55000});
   trace=await page.evaluate(()=>(window as any).recordedTrace);
   result=trace.trim().split('\n').map(line=>JSON.parse(line)).find(e=>e.type==='result')?.result;
   if(result?.summary){await page.locator('.answer-text').waitFor();await page.locator('.answer-text').scrollIntoViewIfNeeded();}
+  assert.equal(await page.getByRole('textbox',{name:'Ask Dash to use the browser'}).inputValue(),prompt);
   await hold(3000);
   await page.screenshot({path:`artifacts/recordings/${recordingName}-final.png`});
 } finally {await context.close();await video.saveAs(`artifacts/recordings/${recordingName}.webm`);await browser.close();}

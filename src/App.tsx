@@ -66,7 +66,7 @@ export default function App() {
     setFollowUp("");
     submitting.current = true;
     task.current = crypto.randomUUID();
-    replaceDraft("");
+    replaceDraft(text);
     setReview(false);
     setApprovalError(null);
     void dash.run(text, continuation ? dash.runId : undefined).finally(() => {
