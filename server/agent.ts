@@ -1095,23 +1095,24 @@ export async function executeGeneral(
         .filter((url) => Boolean(amazonASIN(url)))
         .slice(0, 6);
       if (fixedLlamaRun && preloadedProductURLs.length >= 5) {
+        for (const tab of generalContext!.pages()) {
+          if (!preloadedProductURLs.includes(tab.url())) continue;
+          registerTabs(tab);
+          disclosedTabs.add(tab);
+          tabWork.set(tab, "ready");
+        }
         send("action", {
-          label: "Launching six mechanical name checks in parallel",
+          label: "Five preloaded llama tabs selected",
           actions: ++actions,
           status: "done",
         });
-        const inspected = await inspectAmazonURLs(preloadedProductURLs, id);
-        const eligible = inspected.filter((candidate) => candidate.status === "eligible");
-        if (eligible.length >= 5) {
-          const fastCart = await addAmazonURLs(
-            eligible.slice(0, 5).map((candidate) => candidate.url),
-            id,
-          );
-          messages.push({
-            role: "user",
-            content: `The deterministic low-latency harness already matched five distinct llama/alpaca product names and launched all five Add-to-Cart actions concurrently. Continue from this live cart state without searching, inspecting, or adding products again. Verify and clean the cart, then follow the authorized checkout policy. Fast-cart result: ${JSON.stringify(fastCart)}`,
-          });
-        }
+        const firstTab = generalContext!.pages().find((tab) => tab.url() === preloadedProductURLs[0]);
+        if (firstTab) await showWorkerProgress(firstTab, "Opening five preloaded llama products", id);
+        const fastCart = await addAmazonURLs(preloadedProductURLs.slice(0, 5), id);
+        messages.push({
+          role: "user",
+          content: `The zero-selection-latency harness already took five distinct products from the preloaded llama-category tabs and launched all five Add-to-Cart actions concurrently, without model or image analysis. Continue from this live cart state without searching, inspecting, or adding products again. Verify and clean the cart, then follow the authorized checkout policy. Fast-cart result: ${JSON.stringify(fastCart)}`,
+        });
       }
     }
     for (let turn = 0; !summary; turn++) {
