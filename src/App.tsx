@@ -420,7 +420,7 @@ export default function App() {
                     aria-label="Agent browser"
                   >
                     <div className="browser-tab-strip" role="tablist" aria-label="Browser tabs">
-                      {dash.browserPage?.tabs?.filter(tab => tab.active).slice(0, 1).map(tab => {
+                      {dash.browserPage?.tabs?.map(tab => {
                         const activity = Object.values(dash.storeActivity).find(s=>tab.url.endsWith(`/shop/${s.store}`));
                         const activeWork = (dash.running) && (activity ? ["searching","cart"].includes(activity.status) : tab.work ? ["loading","reading"].includes(tab.work) : tab.active);
                         return <button key={tab.id} role="tab" aria-selected={tab.active} className={`browser-tab ${activeWork ? "working" : ""}`} onClick={()=>void dash.selectTab(tab.id)} title={tab.url}>

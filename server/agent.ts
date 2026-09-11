@@ -420,14 +420,17 @@ async function inspectAmazonProduct(
 ): Promise<AmazonProductVerdict> {
   signal.throwIfAborted();
   const canonicalURL = productPage.url();
-  const observation = await productPage.evaluate(readPageScript);
-  const screenshot = await productPage.screenshot({
+  const asin = amazonASIN(canonicalURL);
+  const cached = asin ? amazonProductSnapshots.get(asin) : undefined;
+  const freshCache = cached && Date.now() - cached.createdAt < 5 * 60_000 ? cached : undefined;
+  const observation = freshCache?.observation || await productPage.evaluate(readPageScript);
+  const screenshot = freshCache?.screenshot || await productPage.screenshot({
     type: "jpeg",
-    quality: 64,
+    quality: 48,
     animations: "disabled",
     timeout: 5000,
   });
-  await reportAction("captured product");
+  await reportAction(freshCache ? "using preloaded product snapshot" : "captured product");
   reportInferenceStart();
   const calls: ToolCall[] = [];
   const step = await modelStep(
@@ -473,6 +476,7 @@ let generalContext: BrowserContext | undefined;
 let generalPage: Page | undefined;
 const tabPages = new Map<string, Page>();
 const tabWork = new Map<Page, "loading" | "reading" | "ready" | "error">();
+const disclosedTabs = new Set<Page>();
 let remoteBrowser: Browser | undefined;
 let remoteWarming: Promise<void> | undefined;
 const remotePages: Page[] = [];
@@ -546,7 +550,9 @@ function registerTabs(page: Page) {
 }
 async function browserTabs(active: Page) {
   registerTabs(active);
-  return Promise.all([...tabPages.entries()].filter(([,p])=>!p.isClosed()).map(async ([id,p])=>({id,url:p.url(),title:await p.title().catch(()=>p.url()),active:p===active,work:tabWork.get(p)})));
+  return Promise.all([...tabPages.entries()]
+    .filter(([,p])=>!p.isClosed() && (p === active || disclosedTabs.has(p)))
+    .map(async ([id,p])=>({id,url:p.url(),title:await p.title().catch(()=>p.url()),active:p===active,work:tabWork.get(p)})));
 }
 export async function selectBrowserTab(id: string) {
   const page=tabPages.get(id);
@@ -567,6 +573,11 @@ const amazonWarmQueries = [
   "llama socks",
   "llama keychain",
 ];
+const amazonProductSnapshots = new Map<string, {
+  createdAt: number;
+  observation: unknown;
+  screenshot: Buffer;
+}>();
 
 function amazonSearchURL(query: string) {
   return `https://www.amazon.com/s?k=${encodeURIComponent(query)}`;
@@ -598,9 +609,11 @@ function routeGeneralResource(route: Route) {
     return route.abort();
   }
   const parsedURL = new URL(url);
+  const frameURL = request.frame()?.url() || "";
   if (/\/(?:recaptcha|sorry)\//.test(parsedURL.pathname) && /(^|\.)(google\.com|gstatic\.com)$/.test(parsedURL.hostname)) return route.continue();
   if (
-    ["font"].includes(request.resourceType()) ||
+    ["font", "media"].includes(request.resourceType()) ||
+    (request.resourceType() === "image" && /amazon\.com\/s(?:[?#]|$)/i.test(frameURL)) ||
     /doubleclick|google-analytics|googletagmanager|hotjar|segment\.io/.test(
       url,
     )
@@ -701,6 +714,8 @@ export async function warmAmazonPages() {
             });
           }
           await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
+          await tab.locator('a[href*="/dp/"], a[href*="/gp/product/"]').first().waitFor({ state: "attached", timeout: 2500 }).catch(() => {});
+          await tab.evaluate(() => window.stop()).catch(() => {});
           tabWork.set(tab, "ready");
           return tab;
         } catch {
@@ -729,7 +744,7 @@ export async function warmAmazonPages() {
       }
     }
     await Promise.all(
-      [...uniqueProducts.values()].slice(0, 10).map(async (url) => {
+      [...uniqueProducts.values()].slice(0, 8).map(async (url) => {
         const pathname = new URL(url).pathname;
         const existing = context.pages().find((candidate) => {
           try {
@@ -746,6 +761,16 @@ export async function warmAmazonPages() {
         try {
           await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
           await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
+          await tab.locator('#landingImage, #imgTagWrapperId img, [data-a-image-name="landingImage"]').first().waitFor({ state: "visible", timeout: 2500 }).catch(() => {});
+          const asin = amazonASIN(tab.url());
+          if (asin) {
+            const [observation, screenshot] = await Promise.all([
+              tab.evaluate(readPageScript),
+              tab.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 5000 }),
+            ]);
+            amazonProductSnapshots.set(asin, { createdAt: Date.now(), observation, screenshot });
+          }
+          await tab.evaluate(() => window.stop()).catch(() => {});
           tabWork.set(tab, "ready");
         } catch {
           tabWork.set(tab, "error");
@@ -768,6 +793,8 @@ export async function closeGeneral() {
   generalPage = undefined;
   generalContext = undefined;
   amazonWarming = undefined;
+  amazonProductSnapshots.clear();
+  disclosedTabs.clear();
 }
 export async function executeGeneral(
   prompt: string,
@@ -815,6 +842,7 @@ export async function executeGeneral(
     showPointer = false,
   ) => {
     registerTabs(capturedPage);
+    disclosedTabs.add(capturedPage);
     if (showPointer && pointer)
       await capturedPage.evaluate(
         (point) =>
@@ -861,6 +889,7 @@ export async function executeGeneral(
     label: string,
     toolCallId?: string,
   ) => {
+    disclosedTabs.add(workerPage);
     const now = performance.now();
     if (now - lastWorkerPreview < 180) return Promise.resolve();
     lastWorkerPreview = now;
@@ -916,6 +945,7 @@ export async function executeGeneral(
       const reused = Boolean(tab);
       tab ||= await generalContext!.newPage();
       registerTabs(tab);
+      disclosedTabs.add(tab);
       tab.setDefaultTimeout(4000);
       tabWork.set(tab, reused ? "reading" : "loading");
       try {
@@ -1064,6 +1094,7 @@ export async function executeGeneral(
                     });
                     const tab = existing || await generalContext!.newPage();
                     registerTabs(tab);
+                    disclosedTabs.add(tab);
                     tab.setDefaultTimeout(5000);
                     tabWork.set(tab, existing ? "reading" : "loading");
                     try {
@@ -1108,7 +1139,7 @@ export async function executeGeneral(
                   }
                   const products = [...unique.values()].slice(0, 30);
                   const inspected = products.length >= 5
-                    ? await inspectAmazonURLs(products.slice(0, 10).map((product) => product.url), call.id)
+                    ? await inspectAmazonURLs(products.slice(0, 8).map((product) => product.url), call.id)
                     : [];
                   value = {
                     products: inspected.length ? products.slice(0, 10) : products,
@@ -1647,6 +1678,7 @@ async function resetBrowserView() {
   await Promise.all([...contexts].filter(context=>context!==generalContext).map(context=>context.close()));
   await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
   tabPages.clear();tabWork.clear();openedPages.clear();
+  disclosedTabs.clear();
   amazonWarming = undefined;
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);

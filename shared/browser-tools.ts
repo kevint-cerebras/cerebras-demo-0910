@@ -7,7 +7,7 @@ export const browserTools = [
     function: {
       name: "discover_amazon_products",
       description:
-        "Search 2–8 Amazon merchandise categories concurrently, deduplicate products by ASIN, and immediately inspect up to ten candidates with independent parallel vision workers. Returns structured eligibility verdicts. If fewer than five eligible products are returned, call it again with broader category queries instead of finishing.",
+        "Search 2–8 Amazon merchandise categories concurrently, deduplicate products by ASIN, and immediately inspect up to eight candidates with independent parallel vision workers. Returns structured eligibility verdicts. If fewer than five eligible products are returned, call it again with broader category queries instead of finishing.",
       parameters: {
         type: "object",
         properties: {
@@ -273,7 +273,7 @@ AMAZON SHOPPING BRIEF
 - Choose distinct, clearly matching merchandise. Use one-time purchases, not subscriptions, and delivery rather than pickup.
 - Begin by calling discover_amazon_products with several diverse, targeted merchandise queries in parallel. For a general llama-merch request, use this exact preloaded first wave: llama plush, llama shirt, llama mug, llama decor, llama socks, and llama keychain. Do not navigate to these searches manually or rely on one broad result page. Use llama tote bag, llama stationery, and other synonyms only for a second wave if needed.
 - Products sharing an ASIN are duplicates even when Amazon shows different URLs. If discovery or inspection leaves fewer than five distinct eligible ASINs, immediately run another discovery wave with new category synonyms and inspect the new candidates. Insufficient or duplicate results are NOT a reason to stop or ask the user whether to broaden the search.
-- discover_amazon_products automatically launches independent Qwen vision workers for up to ten unique candidates in the same call. Trust its structured verdicts rather than repeating their work or calling open_amazon_product_tabs on those same URLs. Continue discovery/inspection waves until five eligible distinct products are accumulated, unless Amazon presents a genuine login, CAPTCHA, or access blocker.
+- discover_amazon_products automatically launches independent Qwen vision workers for up to eight diverse unique candidates in the same call. Trust its structured verdicts rather than repeating their work or calling open_amazon_product_tabs on those same URLs. Continue discovery/inspection waves until five eligible distinct products are accumulated, unless Amazon presents a genuine login, CAPTCHA, or access blocker.
 - Select exactly five eligible distinct products, then call add_amazon_products once with those five URLs. That tool adds all five concurrently and returns the live cart observation. Do not add the products one at a time.
 - Verify from the returned live cart that every selected product and quantity is present; do not claim success from an Add-to-Cart confirmation alone.
 - In an authorized purchase session, remove stale or duplicate items from the live Amazon cart yourself so it contains exactly the five selected ASINs, one of each. Cart-level Delete/Remove controls are authorized and do not require user approval. Re-read the cart after cleanup and do not proceed while any extra item remains.
