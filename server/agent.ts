@@ -1685,7 +1685,9 @@ function friendlyBrowserError(message: string) {
   if (/Target page, context or browser has been closed/.test(message))
     return "The browser was closed. Start a new task to reopen it.";
   if (/Timeout.*exceeded|page.goto:.*timeout/i.test(message))
-    return "The website did not become ready in time. You can open the native browser to inspect it, then retry.";
+    return process.env.BROWSER_HEADLESS === "false"
+      ? "The site did not return a usable page after two attempts. Inspect the open browser for a CAPTCHA or error page, then retry."
+      : "The site did not return a usable page after two attempts. Reset the embedded browser and retry; a CAPTCHA or Amazon error page may be blocking it.";
   return message
     .split("Call log:")[0]
     .replace(/\u001b\[[0-9;]*m/g, "")
