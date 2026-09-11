@@ -59,6 +59,60 @@ export type ChatMessage = {
     function: { name: string; arguments: string };
   }[];
 };
+
+function isPlaywrightTimeout(error: unknown) {
+  return error instanceof Error && /Timeout.*exceeded|timed out/i.test(error.message);
+}
+
+async function navigateWhenUsable(page: Page, url: string, timeout = 12_000) {
+  const previousURL = page.url();
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+  } catch (error) {
+    // Amazon frequently keeps ad/service-worker requests alive past Playwright's
+    // navigation deadline even though the document is already usable.
+    const usable =
+      isPlaywrightTimeout(error) &&
+      page.url() !== "about:blank" &&
+      (page.url() !== previousURL || previousURL === url) &&
+      (await page.locator("body").count().catch(() => 0)) > 0;
+    if (!usable) throw error;
+    await page.evaluate(() => window.stop()).catch(() => {});
+  }
+}
+
+const lastStableScreenshot = new WeakMap<Page, Buffer>();
+async function screenshotWhenStable(page: Page, quality: number) {
+  try {
+    const image = await page.screenshot({
+      type: "jpeg",
+      quality,
+      animations: "disabled",
+      timeout: 7_000,
+    });
+    lastStableScreenshot.set(page, image);
+    return image;
+  } catch (error) {
+    if (!isPlaywrightTimeout(error)) throw error;
+    // Stop lingering ad frames and retry once. A preview timeout must not abort
+    // an otherwise healthy shopping run.
+    await page.evaluate(() => window.stop()).catch(() => {});
+    try {
+      const image = await page.screenshot({
+        type: "jpeg",
+        quality,
+        animations: "disabled",
+        timeout: 7_000,
+      });
+      lastStableScreenshot.set(page, image);
+      return image;
+    } catch (retryError) {
+      const cached = lastStableScreenshot.get(page);
+      if (cached && isPlaywrightTimeout(retryError)) return cached;
+      throw retryError;
+    }
+  }
+}
 export async function modelStep(
   messages: ChatMessage[],
   onCall: (call: ToolCall) => void,
@@ -324,12 +378,7 @@ async function inspectMarketplaceListing(
   const canonicalURL = candidatePage.url();
   const observations: unknown[] = [await candidatePage.evaluate(readPageScript)];
   signal.throwIfAborted();
-  const firstPhoto = await candidatePage.screenshot({
-    type: "jpeg",
-    quality: 64,
-    animations: "disabled",
-    timeout: 5000,
-  });
+  const firstPhoto = await screenshotWhenStable(candidatePage, 64);
   await reportAction("captured first listing photo");
 
   const evidence: (
@@ -424,12 +473,7 @@ async function inspectAmazonProduct(
   const cached = asin ? amazonProductSnapshots.get(asin) : undefined;
   const freshCache = cached && Date.now() - cached.createdAt < 5 * 60_000 ? cached : undefined;
   const observation = freshCache?.observation || await productPage.evaluate(readPageScript);
-  const screenshot = freshCache?.screenshot || await productPage.screenshot({
-    type: "jpeg",
-    quality: 48,
-    animations: "disabled",
-    timeout: 5000,
-  });
+  const screenshot = freshCache?.screenshot || await screenshotWhenStable(productPage, 48);
   await reportAction(freshCache ? "using preloaded product snapshot" : "captured product");
   reportInferenceStart();
   const calls: ToolCall[] = [];
@@ -524,7 +568,7 @@ async function inspectRemotePages(urls: string[], report: (page: Page, label: st
       await report(page,reused?"Reading already-open page":"Opening page",0,"coordination");
       let navigation=0;
       if(!reused){
-        const start=performance.now();await page.goto(url,{waitUntil:"domcontentloaded",timeout:12000});navigation=performance.now()-start;
+        const start=performance.now();await navigateWhenUsable(page,url);navigation=performance.now()-start;
         await page.locator("body").waitFor({state:"attached",timeout:3000});
         await report(page,"Page loaded",navigation,"navigation");
       }
@@ -690,10 +734,7 @@ export async function warmGeneral() {
       p.setDefaultTimeout(4000);
     });
     generalPage.setDefaultTimeout(4000);
-    await generalPage.goto(startURL, {
-      waitUntil: "domcontentloaded",
-      timeout: 12000,
-    });
+    await navigateWhenUsable(generalPage, startURL);
     return generalPage;
   })();
   try {
@@ -725,10 +766,7 @@ export async function warmAmazonPages() {
         try {
           if (!existing) {
             tabWork.set(tab, "loading");
-            await tab.goto(amazonSearchURL(query), {
-              waitUntil: "domcontentloaded",
-              timeout: 15000,
-            });
+            await navigateWhenUsable(tab, amazonSearchURL(query), 15_000);
           }
           await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
           await tab.locator('a[href*="/dp/"], a[href*="/gp/product/"]').first().waitFor({ state: "attached", timeout: 2500 }).catch(() => {});
@@ -776,14 +814,14 @@ export async function warmAmazonPages() {
         tab.setDefaultTimeout(5000);
         tabWork.set(tab, "loading");
         try {
-          await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+          await navigateWhenUsable(tab, url, 15_000);
           await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
           await tab.locator('#landingImage, #imgTagWrapperId img, [data-a-image-name="landingImage"]').first().waitFor({ state: "visible", timeout: 2500 }).catch(() => {});
           const asin = amazonASIN(tab.url());
           if (asin) {
             const [observation, screenshot] = await Promise.all([
               tab.evaluate(readPageScript),
-              tab.screenshot({ type: "jpeg", quality: 48, animations: "disabled", timeout: 5000 }),
+              screenshotWhenStable(tab, 48),
             ]);
             amazonProductSnapshots.set(asin, { createdAt: Date.now(), observation, screenshot });
           }
@@ -870,12 +908,7 @@ export async function executeGeneral(
       );
     visited.add(capturedPage.url());
     const captureStart = performance.now();
-    const image = await capturedPage.screenshot({
-      type: "jpeg",
-      quality: 65,
-      timeout: 4000,
-      animations: "disabled",
-    });
+    const image = await screenshotWhenStable(capturedPage, 65);
     recordSpan({
       name: "Visual preview capture",
       category: "presentation",
@@ -968,7 +1001,7 @@ export async function executeGeneral(
       try {
         await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} tab ${reused ? "reused" : "opened"}`, toolCallId);
         if (!reused)
-          await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
+          await navigateWhenUsable(tab, url);
         await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
         tabWork.set(tab, "reading");
         const title = (await tab.title().catch(() => "Amazon product")).slice(0, 70);
@@ -1041,12 +1074,7 @@ export async function executeGeneral(
       send("inference-start", { call: ++modelCallsStarted });
       let queue = Promise.resolve();
       const results: { call: ToolCall; result: unknown }[] = [];
-      const visionImage = await page.screenshot({
-        type: 'jpeg',
-        quality: 72,
-        animations: 'disabled',
-        timeout: 4000,
-      });
+      const visionImage = await screenshotWhenStable(page, 72);
       const step = await modelStep(
         [
           ...messages,
@@ -1117,10 +1145,7 @@ export async function executeGeneral(
                     try {
                       await showWorkerProgress(tab, `${existing ? "Reusing" : "Opening"} Amazon search ${workerIndex + 1}: ${query}`, call.id);
                       if (!existing)
-                        await tab.goto(amazonSearchURL(query), {
-                          waitUntil: "domcontentloaded",
-                          timeout: 15000,
-                        });
+                        await navigateWhenUsable(tab, amazonSearchURL(query), 15_000);
                       await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
                       tabWork.set(tab, "reading");
                       const products = await amazonProductLinks(tab);
@@ -1242,10 +1267,7 @@ export async function executeGeneral(
                   const cartPage = await generalContext!.newPage();
                   registerTabs(cartPage);
                   tabWork.set(cartPage, "loading");
-                  await cartPage.goto("https://www.amazon.com/gp/cart/view.html", {
-                    waitUntil: "domcontentloaded",
-                    timeout: 12000,
-                  });
+                  await navigateWhenUsable(cartPage, "https://www.amazon.com/gp/cart/view.html");
                   page = cartPage;
                   generalPage = cartPage;
                   tabWork.set(cartPage, "ready");
@@ -1294,10 +1316,7 @@ export async function executeGeneral(
                     try {
                       await showWorkerProgress(tab, `Worker ${workerIndex + 1} tab opened`, call.id);
                       if (!reused)
-                        await tab.goto(url, {
-                          waitUntil: "domcontentloaded",
-                          timeout: 12000,
-                        });
+                        await navigateWhenUsable(tab, url);
                       await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
                       tabWork.set(tab, "reading");
                       const workerTitle = (await tab.title().catch(() => "Marketplace listing")).slice(0, 70);
@@ -1350,10 +1369,7 @@ export async function executeGeneral(
                     (demo === "marketplace" && !/(^|\.)facebook\.com$/i.test(target.hostname))
                   )
                     throw new Error(`This run is restricted to ${demo === "amazon" ? "Amazon.com" : "Facebook Marketplace"}.`);
-                  await page!.goto(url, {
-                    waitUntil: "domcontentloaded",
-                    timeout: 12000,
-                  });
+                  await navigateWhenUsable(page!, url);
                   value = await read();
                   await capture(`Opened ${new URL(url).hostname}`, call.id);
                 } else if (call.name === "read_page") {
@@ -1373,10 +1389,16 @@ export async function executeGeneral(
                   value = await read();
                   await capture("Scrolled the page", call.id);
                 } else if (call.name === "go_back") {
-                  await page!.goBack({
-                    waitUntil: "domcontentloaded",
-                    timeout: 12000,
-                  });
+                  try {
+                    await page!.goBack({
+                      waitUntil: "domcontentloaded",
+                      timeout: 12000,
+                    });
+                  } catch (error) {
+                    if (!isPlaywrightTimeout(error) || !(await page!.locator("body").count().catch(() => 0)))
+                      throw error;
+                    await page!.evaluate(() => window.stop()).catch(() => {});
+                  }
                   value = await read();
                   await capture("Went back", call.id);
                 } else if (call.name === "list_tabs") {
@@ -1673,12 +1695,7 @@ function friendlyBrowserError(message: string) {
 
 export async function generalPreview() {
   const page = viewedPage && !viewedPage.isClosed() ? viewedPage : await warmGeneral();
-  const image = await page.screenshot({
-    type: "jpeg",
-    quality: 65,
-    animations: "disabled",
-    timeout: 4000,
-  });
+  const image = await screenshotWhenStable(page, 65);
   return {
     image: `data:image/jpeg;base64,${image.toString("base64")}`,
     url: page.url(),
@@ -1701,7 +1718,7 @@ async function resetBrowserView() {
   await page.route("**/*", routeGeneralResource);
   const demo = configuration().demo;
   const startURL = demo === "amazon" ? "https://www.amazon.com/" : "https://www.facebook.com/marketplace/";
-  if(!page.url().startsWith(startURL)) await page.goto(startURL,{waitUntil:"domcontentloaded",timeout:12000});
+  if(!page.url().startsWith(startURL)) await navigateWhenUsable(page,startURL);
 }
 export async function resetGeneralBrowser() {
   if (busy) throw new Error("Wait for the current browser action to finish.");
@@ -1722,7 +1739,9 @@ export async function interactGeneralBrowser(input: {type: string; x?: number; y
       await page.evaluate(()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve()))));
     } else if (input.type === "key") await page.keyboard.press(input.key!);
     else if (input.type === "text") await page.keyboard.insertText(input.text!);
-    await page.waitForLoadState("domcontentloaded", {timeout: 12000});
+    await page.waitForLoadState("domcontentloaded", {timeout: 12000}).catch((error) => {
+      if (!isPlaywrightTimeout(error)) throw error;
+    });
     return await generalPreview();
   } finally { busy = false; }
 }
