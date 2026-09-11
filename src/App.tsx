@@ -26,7 +26,7 @@ import { DashMessages, DashToolContext } from "./AssistantThread";
 import { BrowserView, DashMark, TimingPanel } from "./components";
 import ApprovalModal from "./ApprovalModal";
 import { getStore, money } from "../shared/catalog";
-import museOfficialArtwork from "./assets/muse-official.webp";
+import museOfficialLogo from "./assets/muse-logo-official.png";
 
 function browserPageLabel(page: { url: string; title: string } | null) {
   if (!page) return "Loading homepage…";
@@ -45,7 +45,7 @@ function MuseAvatar({ large = false }: { large?: boolean }) {
       role="img"
       aria-label="Muse"
     >
-      <img src={museOfficialArtwork} alt="" aria-hidden="true" />
+      <img src={museOfficialLogo} alt="" aria-hidden="true" />
     </span>
   );
 }
