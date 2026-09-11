@@ -465,30 +465,43 @@ function compactAmazonObservation(raw: unknown) {
 
 async function inspectAmazonProductName(productPage: Page): Promise<AmazonProductVerdict> {
   const canonicalURL = productPage.url();
-  const asin = amazonASIN(canonicalURL);
-  const cached = asin ? amazonProductSnapshots.get(asin) : undefined;
-  const freshCache = cached && Date.now() - cached.createdAt < 30 * 60_000 ? cached : undefined;
-  const observation = compactAmazonObservation(
-    freshCache?.observation || await productPage.evaluate(readPageScript),
-  );
-  const title = observation.title || await productPage.title().catch(() => "Unknown product");
-  const priceMatch = observation.text.match(/\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
+  const title = await productPage.title().catch(() => "Unknown product");
+  const bodyText = await productPage.locator("body").innerText({ timeout: 4000 }).catch(() => "");
+  const addButton = productPage.locator(
+    '#add-to-cart-button, input[name="submit.add-to-cart"], button[name="submit.add-to-cart"]',
+  ).first();
+  const addable = await addButton.isVisible().catch(() => false);
+  const priceSelectors = [
+    '#corePriceDisplay_desktop_feature_div .priceToPay .a-offscreen',
+    '#corePrice_feature_div .priceToPay .a-offscreen',
+    '#price_inside_buybox',
+    '#newBuyBoxPrice',
+    '.apexPriceToPay .a-offscreen',
+    '.priceToPay .a-offscreen',
+    '.a-price .a-offscreen',
+  ];
+  let priceText = "";
+  for (const selector of priceSelectors) {
+    const values = await productPage.locator(selector).allTextContents().catch(() => []);
+    priceText = values.map((value) => value.trim()).find((value) => /\$\s*\d/.test(value)) || "";
+    if (priceText) break;
+  }
+  const priceMatch = priceText.match(/\$\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/);
   const priceValue = priceMatch ? Number(priceMatch[1].replace(/,/g, "")) : null;
   const nameMatches = /\b(?:llama|alpaca)\b/i.test(title);
-  const unavailable = /currently unavailable|temporarily out of stock/i.test(observation.text);
-  const addable = /add to cart/i.test(JSON.stringify(observation.elements));
-  const priceAllowed = priceValue === null || (priceValue >= 5 && priceValue <= 50);
+  const unavailable = /currently unavailable|temporarily out of stock|no featured offers available/i.test(bodyText);
+  const priceAllowed = priceValue !== null && priceValue >= 5 && priceValue <= 50;
   const eligible = nameMatches && !unavailable && addable && priceAllowed;
-  const delivery = observation.text.split("\n").find((line) => /deliver|ships?/i.test(line)) || "Delivery checked in cart";
+  const delivery = bodyText.split("\n").find((line) => /deliver|ships?/i.test(line)) || "Delivery checked in cart";
   return {
     status: eligible ? "eligible" : "no_match",
     title,
-    price: priceMatch?.[0]?.replace(/\s+/g, "") || "Verified in cart",
+    price: priceMatch?.[0]?.replace(/\s+/g, "") || "Price unavailable",
     availability: unavailable ? "Unavailable" : addable ? "Add to Cart available" : "No Add to Cart control",
     delivery,
     url: productPage.url() || canonicalURL,
-    evidence: `Mechanical name match: ${nameMatches ? "yes" : "no"}; Add to Cart: ${addable ? "yes" : "no"}.`,
-    reason: eligible ? "Selected by name and basic commerce constraints." : "Failed name, price, availability, or Add-to-Cart check.",
+    evidence: `Live title match: ${nameMatches ? "yes" : "no"}; price: ${priceMatch?.[0] || "not found"}; Add to Cart control: ${addable ? "visible" : "not visible"}.`,
+    reason: eligible ? "Live product controls satisfy the requested constraints." : "The live page failed its title, price, availability, or Add-to-Cart check.",
   };
 }
 let generalContext: BrowserContext | undefined;
@@ -1311,7 +1324,7 @@ export async function executeGeneral(
         const candidateList = [...candidates.values()];
         const selection = await runCoordinationCall(
           "Amazon link-selection inference",
-          "You are the link-selection stage of a fast Amazon shopping agent. From the live Amazon search-result candidates supplied, rank eight distinct links most likely to satisfy the user's product and price constraints. Call finish with only a JSON array of eight canonical candidate URLs, best first. Use only supplied URLs. Do not include commentary or private details.",
+          "You are the link-selection stage of a fast Amazon shopping agent. From the live Amazon search-result candidates supplied, rank twelve distinct links most likely to satisfy the user's product and price constraints. Call finish with only a JSON array of twelve canonical candidate URLs, best first. Use only supplied URLs. Do not include commentary or private details.",
           JSON.stringify({ request: prompt, candidates: candidateList }),
           320,
         );
@@ -1321,15 +1334,15 @@ export async function executeGeneral(
           const candidate = candidates.get(asin);
           if (candidate) rankedURLs.push(candidate.url);
         }
-        if (rankedURLs.length < 8)
+        if (rankedURLs.length < 12)
           for (const candidate of candidateList)
-            if (rankedURLs.length < 8 && !rankedURLs.includes(candidate.url)) rankedURLs.push(candidate.url);
+            if (rankedURLs.length < 12 && !rankedURLs.includes(candidate.url)) rankedURLs.push(candidate.url);
         send("action", {
-          label: `Opening ${Math.min(8, rankedURLs.length)} model-selected product links in parallel`,
+          label: `Opening ${Math.min(12, rankedURLs.length)} model-selected product links in parallel`,
           actions: ++actions,
           status: "done",
         });
-        const inspected = await inspectAmazonURLs(rankedURLs.slice(0, 8), id);
+        const inspected = await inspectAmazonURLs(rankedURLs.slice(0, 12), id);
         const selectedURLs = inspected
           .filter((candidate) => candidate.status === "eligible")
           .slice(0, 5)
