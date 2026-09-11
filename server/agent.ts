@@ -787,7 +787,6 @@ export async function executeGeneral(
   let actions = 0;
   let modelCallsStarted = 0;
   let summary = "";
-  let backgroundCoordinator: Promise<string | undefined> | undefined;
   let orderSubmissionPending = false;
   let page: Page | undefined;
   let pointer: { x: number; y: number } | null = null;
@@ -979,11 +978,7 @@ export async function executeGeneral(
   };
   const addAmazonURLs = async (urls: string[], toolCallId: string) => {
     const addResults: { url: string; added: boolean; error?: string }[] = [];
-    // Amazon's cart is one shared server-side object. Concurrent POSTs race and
-    // can overwrite one another, causing expensive discovery/retry loops. Keep
-    // product reads parallel, but commit the five already-selected items as one
-    // tight inference-free sequence.
-    for (const [workerIndex, url] of urls.entries()) {
+    const prepared = await Promise.all(urls.map(async (url, workerIndex) => {
       const requested = new URL(url);
       const tab = generalContext!.pages().find((candidate) => {
         try {
@@ -994,8 +989,7 @@ export async function executeGeneral(
         }
       });
       if (!tab) {
-        addResults.push({ url, added: false, error: "Preloaded product tab is no longer open." });
-        continue;
+        return { url, workerIndex, error: "Selected product tab is no longer open." };
       }
       try {
         const button = tab.locator(
@@ -1003,29 +997,71 @@ export async function executeGeneral(
         ).first();
         if (!await button.isVisible().catch(() => false))
           throw new Error("No visible one-time Add to Cart control was found.");
-        const cartWrite = await button.evaluate(async (element) => {
-          const submit = element as HTMLButtonElement | HTMLInputElement;
-          const form = submit.closest("form");
-          if (!form) throw new Error("Amazon Add to Cart form was not found.");
-          const body = new FormData(form);
-          if (submit.name) body.append(submit.name, submit.value || "Add to Cart");
-          const response = await fetch(form.action || location.href, {
-            method: (form.method || "POST").toUpperCase(),
-            body,
-            credentials: "include",
-            redirect: "follow",
-          });
-          const responseText = await response.text();
+        const control = await button.evaluate((element, index) => {
+          const controlId = `amazon-cart-${index}-${crypto.randomUUID().slice(0, 8)}`;
+          element.setAttribute("data-dash-node", controlId);
+          const input = element as HTMLInputElement;
           return {
-            ok: response.ok && !/page not found|captcha|enter the characters/i.test(responseText),
-            status: response.status,
+            id: controlId,
+            label: element.getAttribute("aria-label") || input.value || element.textContent || "Add to Cart",
           };
-        });
-        if (!cartWrite.ok)
-          throw new Error(`Amazon rejected the cart update (${cartWrite.status}).`);
+        }, workerIndex);
+        return {
+          url,
+          workerIndex,
+          tab,
+          control,
+          title: await tab.title(),
+        };
+      } catch (error) {
+        return {
+          url,
+          workerIndex,
+          tab,
+          error: error instanceof Error ? friendlyBrowserError(error.message) : "Add to Cart control failed.",
+        };
+      }
+    }));
+    const actionable = prepared.filter((item): item is typeof item & { tab: Page; control: { id: string; label: string }; title: string } =>
+      "tab" in item && "control" in item && Boolean(item.tab && item.control),
+    );
+    const actionPlan = await runCoordinationCall(
+      "Add-to-cart action inference",
+      "You are the action stage of a fast Amazon shopping agent. The supplied products are already open in live browser tabs. Select every listed Add to Cart control and call finish with only a JSON array of the five control IDs. Do not omit a product, add commentary, expose private details, or claim the click already happened.",
+      JSON.stringify({ request: prompt, products: actionable.map(({ url, title, control }) => ({ url, title, control })) }),
+      260,
+    );
+    const modelControlIDs = new Set(actionPlan?.match(/amazon-cart-\d+-[a-f0-9]{8}/gi) || []);
+    // The LLM selects the controls. Fall back to the supplied five only if its
+    // JSON formatting was incomplete; never rediscover products here.
+    const selectedActions = actionable.filter((item) => modelControlIDs.has(item.control.id));
+    if (selectedActions.length !== actionable.length) {
+      selectedActions.length = 0;
+      selectedActions.push(...actionable);
+    }
+    // Amazon's cart is shared server-side, so execute the model-selected native
+    // clicks in a tight sequence. The reasoning is one call; browser writes do
+    // not race or overwrite one another.
+    for (const item of selectedActions) {
+      const { url, workerIndex, tab, control } = item;
+      try {
+        await tab.bringToFront();
+        generalPage = tab;
+        await showWorkerProgress(tab, `Cerebras clicking product ${workerIndex + 1}`, toolCallId);
+        const button = tab.locator(`[data-dash-node="${control.id}"]`);
+        const response = tab.waitForResponse(
+          (candidate) => candidate.request().method() === "POST" && /(?:cart|add-to-cart)/i.test(candidate.url()),
+          { timeout: 7000 },
+        ).catch(() => null);
+        await button.click({ timeout: 7000 });
+        await response;
+        await tab.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+        const resultText = await tab.locator("body").innerText({ timeout: 3000 }).catch(() => "");
+        if (/page not found|captcha|enter the characters/i.test(`${await tab.title().catch(() => "")}\n${resultText}`))
+          throw new Error("Amazon did not accept the native Add to Cart action.");
         await showWorkerProgress(tab, `Amazon cart worker ${workerIndex + 1}: added product`, toolCallId);
         send("action", {
-          label: `Cart batch ${workerIndex + 1}/${urls.length}: added product`,
+          label: `Cerebras added product ${workerIndex + 1}/${urls.length}`,
           actions: ++actions,
           status: "done",
         });
@@ -1035,6 +1071,8 @@ export async function executeGeneral(
         addResults.push({ url, added: false, error: error instanceof Error ? friendlyBrowserError(error.message) : "Add to Cart failed." });
       }
     }
+    for (const item of prepared)
+      if (!("control" in item)) addResults.push({ url: item.url, added: false, error: item.error });
     const cartPage = await generalContext!.newPage();
     registerTabs(cartPage);
     tabWork.set(cartPage, "loading");
@@ -1915,7 +1953,6 @@ export async function executeGeneral(
           } catch { /* Keep non-JSON tool responses intact. */ }
       }
     }
-    await backgroundCoordinator;
     send("done", {
       summary,
       metrics: {
