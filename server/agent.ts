@@ -976,7 +976,11 @@ export async function executeGeneral(
       }
     }));
   };
-  const addAmazonURLs = async (urls: string[], toolCallId: string) => {
+  const addAmazonURLs = async (
+    urls: string[],
+    toolCallId: string,
+    existingExpectedURLs: string[] = [],
+  ) => {
     const addResults: { url: string; added: boolean; error?: string }[] = [];
     const prepared = await Promise.all(urls.map(async (url, workerIndex) => {
       const requested = new URL(url);
@@ -1027,7 +1031,7 @@ export async function executeGeneral(
     );
     const actionPlan = await runCoordinationCall(
       "Add-to-cart action inference",
-      "You are the action stage of a fast Amazon shopping agent. The supplied products are already open in live browser tabs. Select every listed Add to Cart control and call finish with only a JSON array of the five control IDs. Do not omit a product, add commentary, expose private details, or claim the click already happened.",
+      "You are the action stage of a fast Amazon shopping agent. The supplied products are already open in live browser tabs. Select every listed Add to Cart control and call finish with only a JSON array of all supplied control IDs. Do not omit a product, add commentary, expose private details, or claim the click already happened.",
       JSON.stringify({ request: prompt, products: actionable.map(({ url, title, control }) => ({ url, title, control })) }),
       260,
     );
@@ -1080,7 +1084,11 @@ export async function executeGeneral(
     page = cartPage;
     generalPage = cartPage;
     tabWork.set(cartPage, "ready");
-    const expectedASINs = new Set(urls.map(amazonASIN).filter((asin): asin is string => Boolean(asin)));
+    const expectedASINs = new Set(
+      [...existingExpectedURLs, ...urls]
+        .map(amazonASIN)
+        .filter((asin): asin is string => Boolean(asin)),
+    );
     // Scope strictly to the active cart. The previous global .sc-list-item
     // selector also counted Amazon's Saved for Later section as cart contents.
     const activeCartSelector = [
@@ -1164,6 +1172,7 @@ export async function executeGeneral(
       additions: addResults,
       addedCount: addResults.filter((result) => result.added).length,
       cartVerified,
+      expectedCount: expectedASINs.size,
       normalizedCart,
       cart,
     };
@@ -1388,8 +1397,37 @@ export async function executeGeneral(
         if (selectedURLs.length < 5) {
           summary = `The live search produced only ${selectedURLs.length} eligible distinct products, so checkout did not start.`;
         } else {
-          const fastCart = await addAmazonURLs(selectedURLs, id);
-          if (config.amazonPurchaseAuthorized && fastCart.addedCount === 5 && fastCart.cartVerified) {
+          const firstCart = await addAmazonURLs(selectedURLs, id);
+          let finalCart = firstCart;
+          if (!firstCart.cartVerified) {
+            const presentASINs = new Set(firstCart.normalizedCart.map((item) => item.asin));
+            const successfulURLs = selectedURLs.filter((url) => {
+              const asin = amazonASIN(url);
+              return Boolean(asin && presentASINs.has(asin));
+            });
+            const reserveURLs = inspected
+              .filter((candidate) => candidate.status === "eligible")
+              .slice(5)
+              .map((candidate) => String(candidate.url))
+              .filter((url) => {
+                const asin = amazonASIN(url);
+                return Boolean(asin && !presentASINs.has(asin));
+              });
+            const replacementsNeeded = Math.max(0, 5 - successfulURLs.length);
+            if (replacementsNeeded > 0 && reserveURLs.length >= replacementsNeeded) {
+              send("action", {
+                label: `Replacing ${replacementsNeeded} product${replacementsNeeded === 1 ? "" : "s"} Amazon did not add`,
+                actions: ++actions,
+                status: "done",
+              });
+              finalCart = await addAmazonURLs(
+                reserveURLs.slice(0, replacementsNeeded),
+                id,
+                successfulURLs,
+              );
+            }
+          }
+          if (config.amazonPurchaseAuthorized && finalCart.expectedCount === 5 && finalCart.cartVerified) {
             const checkout = await fastAmazonCheckout(page!);
             if (checkout.status === "confirmed")
               summary = "Order confirmed. Five model-selected products were added and Amazon displayed its order-confirmation page.";
@@ -1402,9 +1440,7 @@ export async function executeGeneral(
             page = checkout.page;
             generalPage = checkout.page;
           } else {
-            summary = fastCart.addedCount !== 5
-              ? `Amazon accepted ${fastCart.addedCount} of 5 cart additions, so checkout did not start.`
-              : "Amazon did not expose five matching active-cart rows after the additions, so checkout did not start.";
+            summary = "Amazon still did not expose five matching active-cart items after the automatic replacement pass, so checkout did not start.";
           }
         }
       }
