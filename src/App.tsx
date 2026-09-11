@@ -1,5 +1,17 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, Check, Code2, Mic, Plus, Square } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  ArrowUp,
+  ArrowRight,
+  Check,
+  Code2,
+  Globe2,
+  Menu,
+  MessageCircle,
+  Mic,
+  Plus,
+  Square,
+  Zap,
+} from "lucide-react";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -23,6 +35,38 @@ function browserPageLabel(page: { url: string; title: string } | null) {
       return `${page.title || "Local site"} · localhost`;
   } catch { /* The page can be opening its first URL. */ }
   return page.url;
+}
+
+function MuseAvatar({ large = false }: { large?: boolean }) {
+  const id = useId().replace(/:/g, "");
+  return (
+    <svg
+      className={`muse-avatar${large ? " muse-avatar-large" : ""}`}
+      viewBox="0 0 100 100"
+      role="img"
+      aria-label="Muse character"
+    >
+      <defs>
+        <radialGradient id={`${id}-fur`} cx="48%" cy="35%">
+          <stop offset="0" stopColor="#fffaf0" />
+          <stop offset="1" stopColor="#ded1bd" />
+        </radialGradient>
+        <radialGradient id={`${id}-face`}>
+          <stop offset="0" stopColor="#ffe9cc" />
+          <stop offset="1" stopColor="#e9c9a5" />
+        </radialGradient>
+      </defs>
+      <ellipse cx="50" cy="91" rx="26" ry="5" fill="#9b826a22" />
+      <path d="M22 61c0-22 11-40 28-40s28 18 28 40v12c0 14-11 21-28 21s-28-7-28-21z" fill={`url(#${id}-fur)`} />
+      <path d="M23 57c-10 6-12 22-6 27 6 4 12-7 15-18M77 57c10 6 12 22 6 27-6 4-12-7-15-18" fill={`url(#${id}-fur)`} />
+      <ellipse cx="50" cy="45" rx="20" ry="18" fill={`url(#${id}-face)`} />
+      <circle cx="42" cy="44" r="2.4" fill="#3c2b25" />
+      <circle cx="58" cy="44" r="2.4" fill="#3c2b25" />
+      <path d="M47 52q3 3 6 0" fill="none" stroke="#79594b" strokeWidth="1.8" strokeLinecap="round" />
+      <circle cx="36" cy="50" r="3" fill="#e49e8b44" />
+      <circle cx="64" cy="50" r="3" fill="#e49e8b44" />
+    </svg>
+  );
 }
 
 export default function App() {
@@ -301,14 +345,21 @@ export default function App() {
                 : "Ready for your approval",
         }}
       >
-        <div className="demo-app" data-assistant-ui="external-store-runtime">
+        <div className={`demo-app${isAmazon ? " muse-skin" : ""}`} data-assistant-ui="external-store-runtime">
           <header className="demo-header">
-            <div>
-              <DashMark small />
-              <strong>Dash</strong>
-              <span>Your browser assistant.</span>
+            <button
+              type="button"
+              className="demo-menu"
+              aria-label="Open controls"
+              onClick={() => setDetails(true)}
+            >
+              <Menu size={19} />
+            </button>
+            <div className="demo-brand">
+              {isAmazon ? <MuseAvatar /> : <DashMark small />}
+              <strong>{isAmazon ? "Muse" : "Dash"}</strong>
             </div>
-            <div>
+            <div className="demo-header-state">
                 <button
                   className="demo-stats"
                   aria-label="Development timing overlay"
@@ -361,64 +412,6 @@ export default function App() {
             </div>
           </header>
           <ThreadPrimitive.Root className="demo-thread">
-            <ComposerPrimitive.Root className="demo-composer">
-              <ComposerPrimitive.Input
-                ref={composerInput}
-                aria-label="Ask Dash to use the browser"
-                placeholder={isAmazon ? "What should I shop for on Amazon?" : "What should I find on Marketplace?"}
-                onChange={(e) => {
-                  const text = e.target.value;
-                  queueMicrotask(() => setInput(text));
-                }}
-                submitMode={voice.listening ? "none" : "enter"}
-                disabled={dash.running || dash.resetting}
-                rows={2}
-                maxLength={2500}
-              />
-              {dash.running ? (
-                <ComposerPrimitive.Cancel asChild>
-                  <button className="demo-submit">
-                    <Square size={14} /> Stop
-                  </button>
-                </ComposerPrimitive.Cancel>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={
-                      voice.listening
-                        ? "Finish dictation"
-                        : "Speak your request"
-                    }
-                    onClick={voice.listening ? voice.finish : voice.start}
-                  >
-                    {voice.listening ? <Check size={18} /> : <Mic size={18} />}
-                  </button>
-                  <ComposerPrimitive.Send asChild>
-                    <button
-                      className="demo-submit"
-                      disabled={
-                        voice.listening ||
-                        dash.resetting ||
-                        input.trim().length < 3 ||
-                        !dash.health
-                      }
-                    >
-                      Run <ArrowRight size={16} />
-                    </button>
-                  </ComposerPrimitive.Send>
-                </>
-              )}
-            </ComposerPrimitive.Root>
-            <div className="demo-input-note">
-              {voice.listening
-                ? "Listening. Finish dictation, then press Run."
-                : "Execution starts only when you submit."}
-              {voice.voiceError && (
-                <span role="alert"> {voice.voiceError}</span>
-              )}
-            </div>
             <div className="demo-workspace">
               <main className="demo-browser">
                 {dash.browserMode ? (
@@ -474,8 +467,9 @@ export default function App() {
               </main>
               <aside className="demo-assistant">
                 <div className="demo-panel-title">
-                  Assistant{" "}
+                  <span>{isAmazon ? <MuseAvatar /> : <DashMark small />}<b>{isAmazon ? "Muse" : "Dash"}</b></span>
                   <small>
+                    <i />
                     {dash.running
                       ? "Working"
                       : result?.status === "approval"
@@ -498,10 +492,11 @@ export default function App() {
                     <DashMessages />
                   ) : (
                     <div className="demo-intro">
-                      <h2>{isAmazon ? "What should I shop for?" : "What should I find?"}</h2>
+                      {isAmazon ? <MuseAvatar large /> : <DashMark />}
+                      <h2>{isAmazon ? "What can Muse do for you?" : "What should I find?"}</h2>
                       <p>
                         {isAmazon
-                          ? "Give Dash an Amazon shopping request, then watch it prepare and verify the cart."
+                          ? "Ask me to browse Amazon, compare products, and take care of your shopping."
                           : "Give Dash a Marketplace research request, then watch it inspect listings and photos in the live browser."}
                       </p>
                       <p className="demo-fine">
@@ -521,16 +516,77 @@ export default function App() {
                     </form>
                   )}
                 </ThreadPrimitive.Viewport>
+                <div className="demo-composer-dock">
+                  <ComposerPrimitive.Root className="demo-composer">
+                    <button
+                      type="button"
+                      className="composer-plus"
+                      aria-label="New browser task"
+                      onClick={reset}
+                      disabled={dash.running || dash.resetting}
+                    >
+                      <Plus size={18} />
+                    </button>
+                    <ComposerPrimitive.Input
+                      ref={composerInput}
+                      aria-label={isAmazon ? "Ask Muse to use Amazon" : "Ask Dash to use the browser"}
+                      placeholder={isAmazon ? "Message Muse" : "Message Dash about Marketplace"}
+                      onChange={(e) => {
+                        const text = e.target.value;
+                        queueMicrotask(() => setInput(text));
+                      }}
+                      submitMode={voice.listening ? "none" : "enter"}
+                      disabled={dash.running || dash.resetting}
+                      rows={1}
+                      maxLength={2500}
+                    />
+                    {dash.running ? (
+                      <ComposerPrimitive.Cancel asChild>
+                        <button className="demo-submit" aria-label={isAmazon ? "Stop Muse" : "Stop Dash"}>
+                          <Square size={13} />
+                        </button>
+                      </ComposerPrimitive.Cancel>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="composer-voice"
+                          aria-label={voice.listening ? "Finish dictation" : "Speak your request"}
+                          onClick={voice.listening ? voice.finish : voice.start}
+                        >
+                          {voice.listening ? <Check size={17} /> : <Mic size={17} />}
+                        </button>
+                        <ComposerPrimitive.Send asChild>
+                          <button
+                            className="demo-submit"
+                            aria-label="Send request"
+                            disabled={
+                              voice.listening ||
+                              dash.resetting ||
+                              input.trim().length < 3 ||
+                              !dash.health
+                            }
+                          >
+                            <ArrowUp size={17} />
+                          </button>
+                        </ComposerPrimitive.Send>
+                      </>
+                    )}
+                  </ComposerPrimitive.Root>
+                  {(voice.listening || voice.voiceError) && (
+                    <div className="demo-input-note">
+                      {voice.listening ? "Listening…" : voice.voiceError}
+                    </div>
+                  )}
+                  <nav className="demo-assistant-nav" aria-label="Demo status">
+                    <span className="active"><MessageCircle size={18} /><b>Chat</b></span>
+                    <span><Globe2 size={18} /><b>{dash.metrics.pages} pages</b></span>
+                    <span><Zap size={18} /><b>{dash.metrics.modelCalls} calls</b></span>
+                  </nav>
+                </div>
               </aside>
             </div>
           </ThreadPrimitive.Root>
-          <footer className="demo-footer">
-            <span>{isAmazon
-              ? dash.health?.purchaseAuthorized
-                ? "Amazon · Authorized purchase session"
-                : "Amazon · Cart preparation only"
-              : "Facebook Marketplace · Read-only research"}</span>
-          </footer>
           {details && (
             <TimingPanel
               metrics={dash.metrics}
