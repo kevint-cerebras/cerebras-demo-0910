@@ -901,6 +901,61 @@ export async function executeGeneral(
     });
     return state;
   };
+  const inspectAmazonURLs = async (urls: string[], toolCallId: string) => {
+    const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
+    return Promise.all(urls.map(async (url, workerIndex) => {
+      const requested = new URL(url);
+      let tab = existingTabs.find((candidate) => {
+        try {
+          const current = new URL(candidate.url());
+          return current.origin === requested.origin && current.pathname === requested.pathname;
+        } catch {
+          return false;
+        }
+      });
+      const reused = Boolean(tab);
+      tab ||= await generalContext!.newPage();
+      registerTabs(tab);
+      tab.setDefaultTimeout(4000);
+      tabWork.set(tab, reused ? "reading" : "loading");
+      try {
+        await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} tab ${reused ? "reused" : "opened"}`, toolCallId);
+        if (!reused)
+          await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
+        await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
+        tabWork.set(tab, "reading");
+        const title = (await tab.title().catch(() => "Amazon product")).slice(0, 70);
+        await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} loaded: ${title}`, toolCallId);
+        const verdict = await inspectAmazonProduct(
+          tab,
+          signal,
+          () => send("inference-start", { call: ++modelCallsStarted }),
+          (timing) => {
+            timings.push(timing);
+            send("inference", { call: timings.length, timing });
+          },
+          async (label) => {
+            send("action", {
+              label: `Amazon worker ${workerIndex + 1}: ${label}`,
+              actions: ++actions,
+              status: "done",
+            });
+            await showWorkerProgress(tab!, `Amazon worker ${workerIndex + 1}: ${label}`, toolCallId);
+          },
+        );
+        tabWork.set(tab, verdict.status === "blocked" ? "error" : "ready");
+        return { reused, ...verdict };
+      } catch (error) {
+        tabWork.set(tab, "error");
+        return {
+          url,
+          reused,
+          status: "blocked" as const,
+          error: error instanceof Error ? friendlyBrowserError(error.message) : "Product failed to load.",
+        };
+      }
+    }));
+  };
   try {
     send("start", { mode: configuration().mode, model: configuration().model });
     if (viewedPage && !viewedPage.isClosed()) generalPage = viewedPage;
@@ -1034,8 +1089,10 @@ export async function executeGeneral(
                     }
                   }));
                   const unique = new Map<string, { asin: string; url: string; title: string; query: string }>();
-                  for (const search of searches) {
-                    for (const product of search.products) {
+                  for (let productIndex = 0; productIndex < 30 && unique.size < 30; productIndex++) {
+                    for (const search of searches) {
+                      const product = search.products[productIndex];
+                      if (!product) continue;
                       const match = product.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
                       if (!match) continue;
                       const asin = match[1].toUpperCase();
@@ -1046,15 +1103,23 @@ export async function executeGeneral(
                           title: product.title || "Amazon product",
                           query: search.query,
                         });
+                      if (unique.size === 30) break;
                     }
                   }
                   const products = [...unique.values()].slice(0, 30);
+                  const inspected = products.length >= 5
+                    ? await inspectAmazonURLs(products.slice(0, 10).map((product) => product.url), call.id)
+                    : [];
                   value = {
-                    products,
+                    products: inspected.length ? products.slice(0, 10) : products,
                     uniqueCount: products.length,
+                    candidates: inspected,
+                    eligibleCount: inspected.filter((candidate) => candidate.status === "eligible").length,
                     searches: searches.map(({ query, products, ...rest }) => ({ query, candidateCount: products.length, ...rest })),
-                    next: products.length >= 5
-                      ? "Inspect 5–10 of the strongest unique canonical product URLs now. If fewer than five qualify, run another discovery wave with different category queries."
+                    next: inspected.filter((candidate) => candidate.status === "eligible").length >= 5
+                      ? "Choose exactly five eligible distinct products from candidates and call add_amazon_products now. Do not inspect them again."
+                      : products.length >= 5
+                        ? "Fewer than five inspected candidates qualified. Immediately run another discovery wave with different category queries and accumulate the eligible results."
                       : "Immediately run another discovery wave with broader, different merchandise-category queries. Do not finish or ask the user for permission.",
                   };
                   await capture(`Discovered ${products.length} unique Amazon products`, call.id);
@@ -1074,59 +1139,7 @@ export async function executeGeneral(
                   }))];
                   if (urls.length < 5)
                     throw new Error("Choose at least five unique Amazon products.");
-                  const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
-                  const inspected = await Promise.all(urls.map(async (url, workerIndex) => {
-                    const requested = new URL(url);
-                    let tab = existingTabs.find((candidate) => {
-                      try {
-                        const current = new URL(candidate.url());
-                        return current.origin === requested.origin && current.pathname === requested.pathname;
-                      } catch {
-                        return false;
-                      }
-                    });
-                    const reused = Boolean(tab);
-                    tab ||= await generalContext!.newPage();
-                    registerTabs(tab);
-                    tab.setDefaultTimeout(4000);
-                    tabWork.set(tab, "loading");
-                    try {
-                      await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} tab opened`, call.id);
-                      if (!reused)
-                        await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 12000 });
-                      await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
-                      tabWork.set(tab, "reading");
-                      const title = (await tab.title().catch(() => "Amazon product")).slice(0, 70);
-                      await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1} loaded: ${title}`, call.id);
-                      const verdict = await inspectAmazonProduct(
-                        tab,
-                        signal,
-                        () => send("inference-start", { call: ++modelCallsStarted }),
-                        (timing) => {
-                          timings.push(timing);
-                          send("inference", { call: timings.length, timing });
-                        },
-                        async (label) => {
-                          send("action", {
-                            label: `Amazon worker ${workerIndex + 1}: ${label}`,
-                            actions: ++actions,
-                            status: "done",
-                          });
-                          await showWorkerProgress(tab, `Amazon worker ${workerIndex + 1}: ${label}`, call.id);
-                        },
-                      );
-                      tabWork.set(tab, verdict.status === "blocked" ? "error" : "ready");
-                      return { reused, ...verdict };
-                    } catch (error) {
-                      tabWork.set(tab, "error");
-                      return {
-                        url,
-                        reused,
-                        status: "blocked" as const,
-                        error: error instanceof Error ? friendlyBrowserError(error.message) : "Product failed to load.",
-                      };
-                    }
-                  }));
+                  const inspected = await inspectAmazonURLs(urls, call.id);
                   value = {
                     candidates: inspected,
                     eligibleCount: inspected.filter((candidate) => candidate.status === "eligible").length,
