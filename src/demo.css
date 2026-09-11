@@ -626,10 +626,27 @@ body:has(.demo-app.muse-skin) {
 }
 
 .muse-avatar {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+  overflow: hidden;
   width: 52px;
   height: 52px;
   margin-bottom: -13px;
-  filter: drop-shadow(0 5px 8px rgba(93, 70, 48, 0.1));
+  border-radius: 24%;
+  background: #f8fbff;
+  filter: drop-shadow(0 5px 8px rgba(0, 100, 224, 0.13));
+}
+
+.muse-avatar img {
+  position: absolute;
+  top: -55%;
+  left: -187%;
+  width: 558%;
+  max-width: none;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
 }
 
 .demo-brand strong {
@@ -854,7 +871,7 @@ body:has(.demo-app.muse-skin) {
   width: 112px;
   height: 112px;
   margin: 0 0 12px;
-  filter: drop-shadow(0 12px 22px rgba(103, 76, 46, 0.12));
+  filter: drop-shadow(0 12px 22px rgba(0, 100, 224, 0.16));
 }
 
 .demo-intro h2 {

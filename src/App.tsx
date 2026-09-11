@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowUp,
   ArrowRight,
@@ -26,6 +26,7 @@ import { DashMessages, DashToolContext } from "./AssistantThread";
 import { BrowserView, DashMark, TimingPanel } from "./components";
 import ApprovalModal from "./ApprovalModal";
 import { getStore, money } from "../shared/catalog";
+import museOfficialArtwork from "./assets/muse-official.webp";
 
 function browserPageLabel(page: { url: string; title: string } | null) {
   if (!page) return "Loading homepage…";
@@ -38,34 +39,14 @@ function browserPageLabel(page: { url: string; title: string } | null) {
 }
 
 function MuseAvatar({ large = false }: { large?: boolean }) {
-  const id = useId().replace(/:/g, "");
   return (
-    <svg
+    <span
       className={`muse-avatar${large ? " muse-avatar-large" : ""}`}
-      viewBox="0 0 100 100"
       role="img"
-      aria-label="Muse character"
+      aria-label="Muse"
     >
-      <defs>
-        <radialGradient id={`${id}-fur`} cx="48%" cy="35%">
-          <stop offset="0" stopColor="#fffaf0" />
-          <stop offset="1" stopColor="#ded1bd" />
-        </radialGradient>
-        <radialGradient id={`${id}-face`}>
-          <stop offset="0" stopColor="#ffe9cc" />
-          <stop offset="1" stopColor="#e9c9a5" />
-        </radialGradient>
-      </defs>
-      <ellipse cx="50" cy="91" rx="26" ry="5" fill="#9b826a22" />
-      <path d="M22 61c0-22 11-40 28-40s28 18 28 40v12c0 14-11 21-28 21s-28-7-28-21z" fill={`url(#${id}-fur)`} />
-      <path d="M23 57c-10 6-12 22-6 27 6 4 12-7 15-18M77 57c10 6 12 22 6 27-6 4-12-7-15-18" fill={`url(#${id}-fur)`} />
-      <ellipse cx="50" cy="45" rx="20" ry="18" fill={`url(#${id}-face)`} />
-      <circle cx="42" cy="44" r="2.4" fill="#3c2b25" />
-      <circle cx="58" cy="44" r="2.4" fill="#3c2b25" />
-      <path d="M47 52q3 3 6 0" fill="none" stroke="#79594b" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="36" cy="50" r="3" fill="#e49e8b44" />
-      <circle cx="64" cy="50" r="3" fill="#e49e8b44" />
-    </svg>
+      <img src={museOfficialArtwork} alt="" aria-hidden="true" />
+    </span>
   );
 }
 
