@@ -600,26 +600,43 @@ async function amazonProductLinks(searchPage: Page) {
       })),
     );
 }
-function routeGeneralResource(route: Route) {
+async function routeGeneralResource(route: Route) {
   const request = route.request();
   const url = request.url();
   try {
     safePublicURL(url, `http://127.0.0.1:${process.env.PORT || 3100}`);
   } catch {
-    return route.abort();
+    await route.abort().catch(() => {});
+    return;
   }
-  const parsedURL = new URL(url);
-  const frameURL = request.frame()?.url() || "";
-  if (/\/(?:recaptcha|sorry)\//.test(parsedURL.pathname) && /(^|\.)(google\.com|gstatic\.com)$/.test(parsedURL.hostname)) return route.continue();
-  if (
-    ["font", "media"].includes(request.resourceType()) ||
-    (request.resourceType() === "image" && /amazon\.com\/s(?:[?#]|$)/i.test(frameURL)) ||
-    /doubleclick|google-analytics|googletagmanager|hotjar|segment\.io/.test(
-      url,
+  try {
+    const parsedURL = new URL(url);
+    let frameURL = "";
+    if (!request.serviceWorker()) {
+      try {
+        frameURL = request.frame().url();
+      } catch {
+        // Early navigation requests can arrive before Playwright exposes a frame.
+      }
+    }
+    if (/\/(?:recaptcha|sorry)\//.test(parsedURL.pathname) && /(^|\.)(google\.com|gstatic\.com)$/.test(parsedURL.hostname)) {
+      await route.continue();
+      return;
+    }
+    if (
+      ["font", "media"].includes(request.resourceType()) ||
+      (request.resourceType() === "image" && /amazon\.com\/s(?:[?#]|$)/i.test(frameURL)) ||
+      /doubleclick|google-analytics|googletagmanager|hotjar|segment\.io/.test(
+        url,
+      )
     )
-  )
-    return route.abort();
-  return route.continue();
+      await route.abort();
+    else
+      await route.continue();
+  } catch {
+    // Resource filtering is an optimization. It must never take down a run.
+    await route.continue().catch(() => {});
+  }
 }
 export async function warmGeneral() {
   if (warming) return warming;
