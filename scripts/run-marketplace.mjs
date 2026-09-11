@@ -13,12 +13,14 @@ if (!['marketplace', 'amazon'].includes(demo)) {
   process.exit(2);
 }
 
+const browserView = process.env.BROWSER_VIEW === 'native' ? 'native' : 'embedded';
 const environment = {
   ...process.env,
   INFERENCE_PROVIDER: provider,
   DEMO_MODE: demo,
-  // Dash renders this browser interactively in its 75%-width preview.
-  BROWSER_HEADLESS: process.env.BROWSER_HEADLESS || 'true',
+  // Embedded presentation is the default and intentionally overrides stale
+  // BROWSER_HEADLESS=false values left in a presenter's shell.
+  BROWSER_HEADLESS: browserView === 'native' ? 'false' : 'true',
 };
 
 if (provider === 'fireworks' && process.platform === 'darwin') {
@@ -44,8 +46,8 @@ const child = spawn(executable, ['server/index.ts'], {
   stdio: 'inherit',
 });
 
-// The Playwright window is the agent's target browser. Open the separate Dash
-// controller automatically so the presenter has an obvious place to submit.
+// Open the Muse controller automatically; its browser pane is the visible
+// agent target in the default embedded presentation mode.
 const dashURL = `http://localhost:${environment.PORT || '3100'}`;
 if (process.platform === 'darwin' && process.env.OPEN_DASH_UI !== 'false') {
   for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -62,7 +64,7 @@ if (process.platform === 'darwin' && process.env.OPEN_DASH_UI !== 'false') {
           stdio: 'ignore',
         });
         opener.unref();
-        console.log(`Dash controller opened at ${dashURL}`);
+        console.log(`Dash controller opened at ${dashURL} with the ${browserView} browser view`);
         break;
       }
     } catch {

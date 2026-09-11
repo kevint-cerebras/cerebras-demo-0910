@@ -47,9 +47,9 @@ Launch with Fireworks:
 npm run amazon:fireworks
 ```
 
-The launcher opens the Dash controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive browser preview or pop-out target browser to log into the active shopping site if needed. The target browser does not initiate a run by itself: type the request in the Dash controller and press **Run**. Do not run two demo commands at once; they share port 3100 but use separate persistent browser profiles.
+The launcher opens the Dash controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive embedded browser to log into the active shopping site if needed. The browser does not initiate a run by itself: type the request in the Dash controller and press **Run**. Do not run two demo commands at once; they share port 3100 but use separate persistent browser profiles.
 
-The default embedded browser runs headlessly at the process level but is visible and interactive in Dash. To request a separate native window from a normal macOS Terminal, run with `BROWSER_HEADLESS=false`.
+The browser is embedded in the 75%-width side of the Muse interface by default. It runs headlessly at the process level but remains visible and interactive in Muse. The launcher deliberately ignores a stale `BROWSER_HEADLESS=false` exported by an earlier shell command. To explicitly request a separate native window, run with `BROWSER_VIEW=native`.
 
 ## Demo prompt
 
@@ -61,7 +61,7 @@ The fixed brief behind the composer narrows the output to two verified matches a
 
 After Dash collects plausible search-result links, it fans out up to ten independent Qwen workers concurrently. Each worker owns one Facebook Marketplace tab in the shared logged-in context, evaluates only the first listing screenshot, verifies open-beak pixels and Sunnyvale shipping, and returns a structured verdict with a single vision call. This deliberately trades gallery coverage for minimum demo latency. The parent coordinator gathers every verdict and always calls the final-answer tool with the best two matches or an explicit blocker result.
 
-Worker tabs appear in the Dash tab strip as soon as they are created. While processing continues concurrently, the pop-out browser and embedded preview rotate through individual worker tabs as their first photos are captured and judged; the status line identifies the worker currently on screen. The always-visible elapsed-time counter is omitted from the presentation UI.
+Worker tabs appear in the Muse tab strip as soon as they are created. While processing continues concurrently, the embedded browser rotates through individual worker tabs as their first photos are captured and judged; the status line identifies the worker currently on screen. The always-visible elapsed-time counter is omitted from the presentation UI.
 
 The submitted request remains pinned at the top of the assistant panel throughout processing and after the final answer, so the demo audience can always see the task the workers are executing.
 
