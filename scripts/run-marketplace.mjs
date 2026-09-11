@@ -52,6 +52,11 @@ if (process.platform === 'darwin' && process.env.OPEN_DASH_UI !== 'false') {
     try {
       const response = await fetch(`${dashURL}/api/health`);
       if (response.ok) {
+        if (demo === 'amazon') {
+          console.log('Preloading Amazon search and product tabs…');
+          const preload = await fetch(`${dashURL}/api/browser/preload`);
+          if (!preload.ok) throw new Error(`Amazon preload failed with status ${preload.status}`);
+        }
         const opener = spawn('open', [dashURL], {
           detached: true,
           stdio: 'ignore',

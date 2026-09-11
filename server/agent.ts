@@ -554,8 +554,39 @@ export async function selectBrowserTab(id: string) {
   return generalPreview();
 }
 let warming: Promise<Page> | undefined;
+let amazonWarming: Promise<void> | undefined;
 let busy = false;
 let whenIdle: Promise<void> = Promise.resolve();
+const amazonWarmQueries = [
+  "llama plush",
+  "llama shirt",
+  "llama mug",
+  "llama decor",
+  "llama socks",
+  "llama keychain",
+];
+
+function amazonSearchURL(query: string) {
+  return `https://www.amazon.com/s?k=${encodeURIComponent(query)}`;
+}
+
+function amazonASIN(raw: string) {
+  return raw.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i)?.[1]?.toUpperCase();
+}
+
+async function amazonProductLinks(searchPage: Page) {
+  return searchPage
+    .locator('a[href*="/dp/"], a[href*="/gp/product/"]')
+    .evaluateAll((anchors) =>
+      anchors.slice(0, 80).map((anchor) => ({
+        href: (anchor as HTMLAnchorElement).href,
+        title: (anchor.getAttribute("aria-label") || anchor.textContent || "")
+          .trim()
+          .replace(/\s+/g, " ")
+          .slice(0, 180),
+      })),
+    );
+}
 function routeGeneralResource(route: Route) {
   const request = route.request();
   const url = request.url();
@@ -639,11 +670,102 @@ export async function warmGeneral() {
     warming = undefined;
   }
 }
+
+export async function warmAmazonPages() {
+  if (configuration().demo !== "amazon") return;
+  if (amazonWarming) return amazonWarming;
+  amazonWarming = (async () => {
+    const home = await warmGeneral();
+    const context = generalContext!;
+    const searchPages = await Promise.all(
+      amazonWarmQueries.map(async (query) => {
+        const existing = context.pages().find((candidate) => {
+          try {
+            const url = new URL(candidate.url());
+            return /(^|\.)amazon\.com$/i.test(url.hostname) && url.pathname === "/s" && url.searchParams.get("k") === query;
+          } catch {
+            return false;
+          }
+        });
+        const tab = existing || (await context.newPage());
+        registerTabs(tab);
+        tab.setDefaultTimeout(5000);
+        try {
+          if (!existing) {
+            tabWork.set(tab, "loading");
+            await tab.goto(amazonSearchURL(query), {
+              waitUntil: "domcontentloaded",
+              timeout: 15000,
+            });
+          }
+          await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
+          tabWork.set(tab, "ready");
+          return tab;
+        } catch {
+          tabWork.set(tab, "error");
+          return null;
+        }
+      }),
+    );
+    const uniqueProducts = new Map<string, string>();
+    const productsBySearch = await Promise.all(
+      searchPages.map((searchPage) =>
+        searchPage ? amazonProductLinks(searchPage).catch(() => []) : [],
+      ),
+    );
+    // Round-robin across categories so speculative product tabs are diverse
+    // instead of consuming all ten slots from the first (usually plush) page.
+    for (let productIndex = 0; productIndex < 10 && uniqueProducts.size < 10; productIndex++) {
+      for (const products of productsBySearch) {
+        const product = products[productIndex];
+        if (!product) continue;
+        const asin = amazonASIN(product.href);
+        if (asin && !uniqueProducts.has(asin)) {
+          uniqueProducts.set(asin, `https://www.amazon.com/dp/${asin}`);
+          if (uniqueProducts.size === 10) break;
+        }
+      }
+    }
+    await Promise.all(
+      [...uniqueProducts.values()].slice(0, 10).map(async (url) => {
+        const pathname = new URL(url).pathname;
+        const existing = context.pages().find((candidate) => {
+          try {
+            return new URL(candidate.url()).pathname === pathname;
+          } catch {
+            return false;
+          }
+        });
+        if (existing) return;
+        const tab = await context.newPage();
+        registerTabs(tab);
+        tab.setDefaultTimeout(5000);
+        tabWork.set(tab, "loading");
+        try {
+          await tab.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
+          await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
+          tabWork.set(tab, "ready");
+        } catch {
+          tabWork.set(tab, "error");
+        }
+      }),
+    );
+    generalPage = home;
+    viewedPage = undefined;
+    await home.bringToFront();
+  })();
+  try {
+    await amazonWarming;
+  } finally {
+    amazonWarming = undefined;
+  }
+}
 export async function closeGeneral() {
   await remoteBrowser?.close();
   await generalContext?.close();
   generalPage = undefined;
   generalContext = undefined;
+  amazonWarming = undefined;
 }
 export async function executeGeneral(
   prompt: string,
@@ -869,27 +991,31 @@ export async function executeGeneral(
                   if (queries.length < 2)
                     throw new Error("Choose at least two distinct Amazon search queries.");
                   const searches = await Promise.all(queries.map(async (query, workerIndex) => {
-                    const tab = await generalContext!.newPage();
+                    const existing = generalContext!.pages().find((candidate) => {
+                      try {
+                        const url = new URL(candidate.url());
+                        return /(^|\.)amazon\.com$/i.test(url.hostname) && url.pathname === "/s" && url.searchParams.get("k") === query;
+                      } catch {
+                        return false;
+                      }
+                    });
+                    const tab = existing || await generalContext!.newPage();
                     registerTabs(tab);
                     tab.setDefaultTimeout(5000);
-                    tabWork.set(tab, "loading");
+                    tabWork.set(tab, existing ? "reading" : "loading");
                     try {
-                      await showWorkerProgress(tab, `Amazon search ${workerIndex + 1}: ${query}`, call.id);
-                      await tab.goto(`https://www.amazon.com/s?k=${encodeURIComponent(query)}`, {
-                        waitUntil: "domcontentloaded",
-                        timeout: 15000,
-                      });
+                      await showWorkerProgress(tab, `${existing ? "Reusing" : "Opening"} Amazon search ${workerIndex + 1}: ${query}`, call.id);
+                      if (!existing)
+                        await tab.goto(amazonSearchURL(query), {
+                          waitUntil: "domcontentloaded",
+                          timeout: 15000,
+                        });
                       await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
                       tabWork.set(tab, "reading");
-                      const products = await tab.locator('a[href*="/dp/"], a[href*="/gp/product/"]').evaluateAll((anchors) =>
-                        anchors.slice(0, 80).map((anchor) => ({
-                          href: (anchor as HTMLAnchorElement).href,
-                          title: (anchor.getAttribute("aria-label") || anchor.textContent || "").trim().replace(/\s+/g, " ").slice(0, 180),
-                        })),
-                      );
+                      const products = await amazonProductLinks(tab);
                       tabWork.set(tab, "ready");
                       await showWorkerProgress(tab, `Amazon search ${workerIndex + 1}: found candidates`, call.id);
-                      return { query, products };
+                      return { query, products, reused: Boolean(existing) };
                     } catch (error) {
                       tabWork.set(tab, "error");
                       return {
@@ -1495,6 +1621,7 @@ async function resetBrowserView() {
   await Promise.all([...contexts].filter(context=>context!==generalContext).map(context=>context.close()));
   await Promise.all(generalContext!.pages().filter(tab=>tab!==page).map(tab=>tab.close()));
   tabPages.clear();tabWork.clear();openedPages.clear();
+  amazonWarming = undefined;
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);
   const demo = configuration().demo;

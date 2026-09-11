@@ -13,6 +13,7 @@ import {
 import { configuration } from "./planner";
 import {
   showGeneralBrowser,
+  warmAmazonPages,
   warmGeneral,
   closeGeneral,
   generalPreview,
@@ -76,7 +77,11 @@ app.post("/api/browser/show", async (req, res) => {
     native: process.env.BROWSER_HEADLESS === "false",
   });
 });
-app.get(["/api/browser/preview", "/api/browser/preload"], async (_req, res) => {
+app.get("/api/browser/preview", async (_req, res) => {
+  res.json({ page: await generalPreview() });
+});
+app.get("/api/browser/preload", async (_req, res) => {
+  await warmAmazonPages();
   res.json({ page: await generalPreview() });
 });
 app.post("/api/browser/tab", async (req, res) => {
@@ -244,6 +249,9 @@ const server = app.listen(port, hostname, () => {
   console.log(`Dash is running at http://localhost:${port}`);
   void warmGeneral().catch((error) =>
     console.error("Browser warmup:", error.message),
+  );
+  void warmAmazonPages().catch((error) =>
+    console.error("Amazon page preload:", error.message),
   );
 });
 const cleanup = setInterval(async () => {
