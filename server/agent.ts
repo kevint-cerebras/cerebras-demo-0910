@@ -458,7 +458,7 @@ type AmazonProductVerdict = {
   reason: string;
 };
 
-const amazonProductWorkerSystem = `You are one worker in a parallel Amazon product-inspection pool. Inspect only the product already open in this tab. Use the supplied screenshot and DOM observation to determine whether it matches the user's requested merchandise and every constraint in the private session brief. Verify the visible current price, availability, one-time-purchase status, and delivery eligibility. Reject sponsored noise, unrelated products, subscriptions, unavailable products, and anything outside the private price range. Do not click, navigate, add to cart, check out, or expose private delivery details. Always call finish_product exactly once with a concise structured verdict.`;
+const amazonProductWorkerSystem = `You are one worker in a fully parallel Amazon product-inspection pool. Inspect only the product already open in this tab. For minimum latency, use ONLY its product name/title and supplied DOM text—do not request or analyze images. Determine whether the name matches the requested merchandise and every constraint in the private session brief. Verify the visible current price, availability, one-time-purchase status, and delivery eligibility from text. Reject sponsored noise, unrelated product names, subscriptions, unavailable products, and anything outside the private price range. Do not click, navigate, add to cart, check out, or expose private delivery details. Always call finish_product exactly once with a concise structured verdict.`;
 
 async function inspectAmazonProduct(
   productPage: Page,
@@ -473,23 +473,13 @@ async function inspectAmazonProduct(
   const cached = asin ? amazonProductSnapshots.get(asin) : undefined;
   const freshCache = cached && Date.now() - cached.createdAt < 5 * 60_000 ? cached : undefined;
   const observation = freshCache?.observation || await productPage.evaluate(readPageScript);
-  const screenshot = freshCache?.screenshot || await screenshotWhenStable(productPage, 48);
-  await reportAction(freshCache ? "using preloaded product snapshot" : "captured product");
+  await reportAction(freshCache ? "using preloaded product name" : "read product name");
   reportInferenceStart();
   const calls: ToolCall[] = [];
   const step = await modelStep(
     [{
       role: "user",
-      content: [
-        {
-          type: "text",
-          text: `Inspect this Amazon product and return a verdict. Product URL: ${canonicalURL}\nDOM observation: ${JSON.stringify(observation).slice(0, 14000)}`,
-        },
-        {
-          type: "image_url",
-          image_url: { url: `data:image/jpeg;base64,${screenshot.toString("base64")}`, detail: "low" },
-        },
-      ],
+      content: `Match this Amazon product by product name/title and text only, then return a verdict. Product URL: ${canonicalURL}\nDOM observation: ${JSON.stringify(observation).slice(0, 14000)}`,
     }],
     (call) => calls.push(call),
     signal,
@@ -620,7 +610,6 @@ const amazonWarmQueries = [
 const amazonProductSnapshots = new Map<string, {
   createdAt: number;
   observation: unknown;
-  screenshot: Buffer;
 }>();
 
 function amazonSearchURL(query: string) {
@@ -750,6 +739,14 @@ export async function warmAmazonPages() {
   amazonWarming = (async () => {
     const home = await warmGeneral();
     const context = generalContext!;
+    // Amazon's add-to-cart overlay sometimes leaves transient tabs behind.
+    // They are never useful on the next run and make parallel screenshots and
+    // clicks contend with dead documents in the persistent profile.
+    await Promise.all(
+      context.pages()
+        .filter((tab) => tab !== home && /\/cart\/(?:add-to-cart|smart-wagon)/i.test(tab.url()))
+        .map((tab) => tab.close().catch(() => {})),
+    );
     const searchPages = await Promise.all(
       amazonWarmQueries.map(async (query) => {
         const existing = context.pages().find((candidate) => {
@@ -816,14 +813,10 @@ export async function warmAmazonPages() {
         try {
           await navigateWhenUsable(tab, url, 15_000);
           await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
-          await tab.locator('#landingImage, #imgTagWrapperId img, [data-a-image-name="landingImage"]').first().waitFor({ state: "visible", timeout: 2500 }).catch(() => {});
           const asin = amazonASIN(tab.url());
           if (asin) {
-            const [observation, screenshot] = await Promise.all([
-              tab.evaluate(readPageScript),
-              screenshotWhenStable(tab, 48),
-            ]);
-            amazonProductSnapshots.set(asin, { createdAt: Date.now(), observation, screenshot });
+            const observation = await tab.evaluate(readPageScript);
+            amazonProductSnapshots.set(asin, { createdAt: Date.now(), observation });
           }
           await tab.evaluate(() => window.stop()).catch(() => {});
           tabWork.set(tab, "ready");
@@ -1074,27 +1067,31 @@ export async function executeGeneral(
       send("inference-start", { call: ++modelCallsStarted });
       let queue = Promise.resolve();
       const results: { call: ToolCall; result: unknown }[] = [];
-      const visionImage = await screenshotWhenStable(page, 72);
+      const visionImage = configuration().demo === "marketplace"
+        ? await screenshotWhenStable(page, 72)
+        : undefined;
       const step = await modelStep(
-        [
-          ...messages,
-          {
-            role: 'user',
-            content: [
+        visionImage
+          ? [
+              ...messages,
               {
-                type: 'text',
-                text: 'Current browser screenshot. Use its pixels for every visual claim; use the latest DOM observation for element IDs.',
+                role: 'user',
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Current browser screenshot. Use its pixels for every visual claim; use the latest DOM observation for element IDs.',
+                  },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: `data:image/jpeg;base64,${visionImage.toString('base64')}`,
+                      detail: 'low',
+                    },
+                  },
+                ],
               },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:image/jpeg;base64,${visionImage.toString('base64')}`,
-                  detail: 'low',
-                },
-              },
-            ],
-          },
-        ],
+            ]
+          : messages,
         (call) => {
           queue = queue
             .then(async () => {
@@ -1251,7 +1248,9 @@ export async function executeGeneral(
                       ).first();
                       if (!await button.isVisible().catch(() => false))
                         throw new Error("No visible one-time Add to Cart control was found.");
-                      await button.click({ timeout: 5000 });
+                      // Do not wait on Amazon's transient add-to-cart navigation.
+                      // The cart is verified independently after all five clicks.
+                      await button.click({ timeout: 7000, noWaitAfter: true });
                       await showWorkerProgress(tab, `Amazon cart worker ${workerIndex + 1}: added product`, call.id);
                       send("action", {
                         label: `Amazon cart worker ${workerIndex + 1}: added product`,
@@ -1501,12 +1500,13 @@ export async function executeGeneral(
                       throw new Error(
                         `User approval required for “${label.trim().slice(0, 80)}”. Stop and show what is ready.`,
                       );
-                    await locator.click({ timeout: 4000 });
                     if (
                       authorizedAmazonPurchase &&
                       /\b(?:place (?:your )?order|confirm order|submit order)\b/i.test(label)
                     )
                       orderSubmissionPending = true;
+                    await locator.click({ timeout: 7000, noWaitAfter: true });
+                    await page!.waitForTimeout(250);
                   } else if (call.name === "select") {
                     await locator.selectOption(String(args.value));
                   } else if (call.name === "fill") {
@@ -1684,10 +1684,14 @@ function friendlyBrowserError(message: string) {
     return "Another demo process is using this browser profile. Stop that process and retry.";
   if (/Target page, context or browser has been closed/.test(message))
     return "The browser was closed. Start a new task to reopen it.";
-  if (/Timeout.*exceeded|page.goto:.*timeout/i.test(message))
+  if (/page\.(?:goto|goBack):.*Timeout|Navigation timeout/i.test(message))
     return process.env.BROWSER_HEADLESS === "false"
       ? "The site did not return a usable page after two attempts. Inspect the open browser for a CAPTCHA or error page, then retry."
       : "The site did not return a usable page after two attempts. Reset the embedded browser and retry; a CAPTCHA or Amazon error page may be blocking it.";
+  if (/page\.screenshot:.*Timeout/i.test(message))
+    return "The live browser preview could not refresh, but the page may still be usable. Retry the action without resetting the cart.";
+  if (/locator\.(?:click|fill|press|selectOption):.*Timeout|waiting for locator/i.test(message))
+    return "The requested Amazon control did not become actionable. The agent should reread the current page and retry the control once.";
   return message
     .split("Call log:")[0]
     .replace(/\u001b\[[0-9;]*m/g, "")
