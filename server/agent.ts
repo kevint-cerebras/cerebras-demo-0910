@@ -584,14 +584,6 @@ let warming: Promise<Page> | undefined;
 let amazonWarming: Promise<void> | undefined;
 let busy = false;
 let whenIdle: Promise<void> = Promise.resolve();
-const amazonWarmQueries = [
-  "llama plush",
-  "llama shirt",
-  "llama mug",
-  "llama decor",
-  "llama socks",
-  "llama keychain",
-];
 const amazonProductSnapshots = new Map<string, {
   createdAt: number;
   observation: unknown;
@@ -722,94 +714,28 @@ export async function warmAmazonPages() {
   if (configuration().demo !== "amazon") return;
   if (amazonWarming) return amazonWarming;
   amazonWarming = (async () => {
-    const home = await warmGeneral();
+    await warmGeneral();
     const context = generalContext!;
-    // Cookies and the cart live in the persistent context, not its old tabs.
-    // Start each presentation with one clean home tab so previous product/cart
-    // documents do not compete with the new parallel preload wave.
+    let home = context.pages().find((candidate) => {
+      try {
+        const url = new URL(candidate.url());
+        return /(^|\.)amazon\.com$/i.test(url.hostname) && url.pathname === "/";
+      } catch {
+        return false;
+      }
+    });
+    home ||= await context.newPage();
+    if (!/^https:\/\/www\.amazon\.com\/?(?:[?#].*)?$/i.test(home.url()))
+      await navigateWhenUsable(home, "https://www.amazon.com/");
+    // Warm only the signed-in browser and homepage. Search and product tabs are
+    // intentionally created after the user submits a prompt so the visible run
+    // reflects real model-directed browsing instead of an instant hidden cache.
     await Promise.all(
       context.pages()
         .filter((tab) => tab !== home)
         .map((tab) => tab.close().catch(() => {})),
     );
-    const searchPages = await Promise.all(
-      amazonWarmQueries.map(async (query) => {
-        const existing = context.pages().find((candidate) => {
-          try {
-            const url = new URL(candidate.url());
-            return /(^|\.)amazon\.com$/i.test(url.hostname) && url.pathname === "/s" && url.searchParams.get("k") === query;
-          } catch {
-            return false;
-          }
-        });
-        const tab = existing || (await context.newPage());
-        registerTabs(tab);
-        tab.setDefaultTimeout(5000);
-        try {
-          if (!existing) {
-            tabWork.set(tab, "loading");
-            await navigateWhenUsable(tab, amazonSearchURL(query), 15_000);
-          }
-          await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
-          await tab.locator('a[href*="/dp/"], a[href*="/gp/product/"]').first().waitFor({ state: "attached", timeout: 2500 }).catch(() => {});
-          await tab.evaluate(() => window.stop()).catch(() => {});
-          tabWork.set(tab, "ready");
-          return tab;
-        } catch {
-          tabWork.set(tab, "error");
-          return null;
-        }
-      }),
-    );
-    const uniqueProducts = new Map<string, string>();
-    const productsBySearch = await Promise.all(
-      searchPages.map((searchPage) =>
-        searchPage ? amazonProductLinks(searchPage).catch(() => []) : [],
-      ),
-    );
-    // Round-robin across categories so speculative product tabs are diverse
-    // instead of consuming all ten slots from the first (usually plush) page.
-    for (let productIndex = 0; productIndex < 10 && uniqueProducts.size < 6; productIndex++) {
-      for (const products of productsBySearch) {
-        const product = products[productIndex];
-        if (!product) continue;
-        const asin = amazonASIN(product.href);
-        if (asin && !uniqueProducts.has(asin)) {
-          uniqueProducts.set(asin, `https://www.amazon.com/dp/${asin}`);
-          if (uniqueProducts.size === 6) break;
-        }
-      }
-    }
-    await Promise.all(
-      [...uniqueProducts.values()].slice(0, 6).map(async (url) => {
-        const pathname = new URL(url).pathname;
-        const existing = context.pages().find((candidate) => {
-          try {
-            return new URL(candidate.url()).pathname === pathname;
-          } catch {
-            return false;
-          }
-        });
-        if (existing) return;
-        const tab = await context.newPage();
-        registerTabs(tab);
-        tab.setDefaultTimeout(5000);
-        tabWork.set(tab, "loading");
-        try {
-          await navigateWhenUsable(tab, url, 15_000);
-          await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
-          const asin = amazonASIN(tab.url());
-          if (asin) {
-            const observation = compactAmazonObservation(await tab.evaluate(readPageScript));
-            amazonProductSnapshots.set(asin, { createdAt: Date.now(), observation });
-          }
-          await tab.evaluate(() => window.stop()).catch(() => {});
-          tabWork.set(tab, "ready");
-        } catch {
-          tabWork.set(tab, "error");
-        }
-      }),
-    );
+    amazonProductSnapshots.clear();
     generalPage = home;
     viewedPage = undefined;
     await home.bringToFront();
@@ -1064,17 +990,26 @@ export async function executeGeneral(
         ).first();
         if (!await button.isVisible().catch(() => false))
           throw new Error("No visible one-time Add to Cart control was found.");
-        const cartWrite = tab.waitForResponse(
-          (response) =>
-            response.request().method() === "POST" &&
-            /(?:add-to-cart|\/cart\/|\/gp\/cart)/i.test(response.url()),
-          { timeout: 5000 },
-        ).catch(() => null);
-        await button.click({ timeout: 5000, noWaitAfter: true });
-        // Wait for Amazon to accept this write before starting the next one.
-        // Five acknowledged writes are faster than parallel writes followed by
-        // missing-item discovery and retries.
-        await cartWrite;
+        const cartWrite = await button.evaluate(async (element) => {
+          const submit = element as HTMLButtonElement | HTMLInputElement;
+          const form = submit.closest("form");
+          if (!form) throw new Error("Amazon Add to Cart form was not found.");
+          const body = new FormData(form);
+          if (submit.name) body.append(submit.name, submit.value || "Add to Cart");
+          const response = await fetch(form.action || location.href, {
+            method: (form.method || "POST").toUpperCase(),
+            body,
+            credentials: "include",
+            redirect: "follow",
+          });
+          const responseText = await response.text();
+          return {
+            ok: response.ok && !/page not found|captcha|enter the characters/i.test(responseText),
+            status: response.status,
+          };
+        });
+        if (!cartWrite.ok)
+          throw new Error(`Amazon rejected the cart update (${cartWrite.status}).`);
         await showWorkerProgress(tab, `Amazon cart worker ${workerIndex + 1}: added product`, toolCallId);
         send("action", {
           label: `Cart batch ${workerIndex + 1}/${urls.length}: added product`,
@@ -1311,83 +1246,124 @@ export async function executeGeneral(
       await capture("Reading your current browser tab");
     } else if (configuration().demo === "amazon") {
       send("action", {
-        label: "Using preloaded Amazon catalog",
+        label: "Asking Cerebras how to search Amazon",
         actions: ++actions,
         status: "done",
       });
       const config = configuration();
-      const fixedLlamaRun = /\b(?:llama|alpaca)\b/i.test(`${prompt}\n${config.amazonBrief}`);
-      const preloadedProductURLs = generalContext!.pages()
-        .map((tab) => tab.url())
-        .filter((url) => Boolean(amazonASIN(url)))
-        .slice(0, 6);
-      if (fixedLlamaRun && preloadedProductURLs.length >= 5) {
-        // Three small, real model calls make the reasoning visible without
-        // returning to an open-ended, many-turn browser loop. Intent inference
-        // overlaps the parallel product inspection below.
-        backgroundCoordinator = runCoordinationCall(
-          "Intent and constraint inference",
-          "You are the request-planning stage of a fast Amazon shopping agent. Call finish immediately with one concise sentence describing the requested item category, quantity, price constraints, and whether checkout is authorized. Never expose private address or payment details and do not claim completion.",
-          prompt,
-          160,
-        );
-        for (const tab of generalContext!.pages()) {
-          if (!preloadedProductURLs.includes(tab.url())) continue;
-          registerTabs(tab);
-          disclosedTabs.add(tab);
-          tabWork.set(tab, "ready");
-        }
+      const searchPlan = await runCoordinationCall(
+        "Amazon search planning inference",
+        "You are the search-planning stage of a fast Amazon shopping agent. Infer the requested product category and call finish with only a JSON array of exactly four short, diverse Amazon search queries likely to produce distinct matching items. Respect the user's price and quantity constraints. Never include an address, payment information, commentary, or Markdown.",
+        prompt,
+        180,
+      );
+      let searchQueries: string[] = [];
+      try {
+        const parsed = JSON.parse(searchPlan || "[]");
+        if (Array.isArray(parsed))
+          searchQueries = parsed.filter((value): value is string => typeof value === "string");
+      } catch {
+        searchQueries = [...(searchPlan?.matchAll(/"([^"\n]{3,80})"/g) || [])].map((match) => match[1]);
+      }
+      searchQueries = [...new Set(searchQueries.map((query) => query.trim()).filter((query) => query.length >= 3 && query.length <= 80))].slice(0, 4);
+      if (searchQueries.length < 2) {
+        summary = "Cerebras did not return a usable Amazon search plan, so no cart changes were made.";
+      } else {
         send("action", {
-          label: "Analyzing preloaded product tabs in parallel",
+          label: `Opening ${searchQueries.length} model-selected Amazon searches in parallel`,
           actions: ++actions,
           status: "done",
         });
-        const inspected = await inspectAmazonURLs(preloadedProductURLs, id);
-        const eligible = inspected.filter((candidate) => candidate.status === "eligible");
+        const searchPages = await Promise.all(searchQueries.map(async (query, workerIndex) => {
+          const searchPage = await generalContext!.newPage();
+          registerTabs(searchPage);
+          disclosedTabs.add(searchPage);
+          searchPage.setDefaultTimeout(5000);
+          tabWork.set(searchPage, "loading");
+          try {
+            await showWorkerProgress(searchPage, `Search worker ${workerIndex + 1}: ${query}`, id);
+            await navigateWhenUsable(searchPage, amazonSearchURL(query), 15_000);
+            await searchPage.locator('a[href*="/dp/"], a[href*="/gp/product/"]').first()
+              .waitFor({ state: "attached", timeout: 3500 }).catch(() => {});
+            tabWork.set(searchPage, "ready");
+            await showWorkerProgress(searchPage, `Search worker ${workerIndex + 1}: links found`, id);
+            return { query, page: searchPage, products: await amazonProductLinks(searchPage) };
+          } catch (error) {
+            tabWork.set(searchPage, "error");
+            return { query, page: searchPage, products: [], error: friendlyBrowserError(error instanceof Error ? error.message : "Search failed") };
+          }
+        }));
+        const candidates = new Map<string, { asin: string; title: string; url: string; query: string }>();
+        for (let resultIndex = 0; resultIndex < 12 && candidates.size < 32; resultIndex++) {
+          for (const search of searchPages) {
+            const product = search.products[resultIndex];
+            if (!product) continue;
+            const asin = amazonASIN(product.href);
+            if (!asin || candidates.has(asin)) continue;
+            candidates.set(asin, {
+              asin,
+              title: product.title,
+              url: `https://www.amazon.com/dp/${asin}`,
+              query: search.query,
+            });
+          }
+        }
+        const candidateList = [...candidates.values()];
         const selection = await runCoordinationCall(
-          "Product selection inference",
-          "You are the product-selection stage of a fast Amazon shopping agent. Review the supplied structured candidates, choose exactly five distinct eligible products that best match the user's request, and call finish with only a JSON array containing their canonical URLs. Do not request more browsing and do not include commentary.",
-          JSON.stringify({ request: prompt, candidates: inspected }),
-          260,
+          "Amazon link-selection inference",
+          "You are the link-selection stage of a fast Amazon shopping agent. From the live Amazon search-result candidates supplied, rank eight distinct links most likely to satisfy the user's product and price constraints. Call finish with only a JSON array of eight canonical candidate URLs, best first. Use only supplied URLs. Do not include commentary or private details.",
+          JSON.stringify({ request: prompt, candidates: candidateList }),
+          320,
         );
-        const eligibleURLs = new Set<string>(eligible.map((candidate) => String(candidate.url)));
-        const modelURLs: string[] = selection?.match(/https:\/\/www\.amazon\.com\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[^"\s,\]]*)?/gi) || [];
-        const selectedURLs: string[] = [...new Set<string>(modelURLs)]
-          .filter((url) => eligibleURLs.has(url));
-        for (const candidate of eligible)
-          if (selectedURLs.length < 5 && !selectedURLs.includes(String(candidate.url)))
-            selectedURLs.push(String(candidate.url));
+        const modelASINs = selection?.match(/\b[A-Z0-9]{10}\b/gi)?.map((asin) => asin.toUpperCase()) || [];
+        const rankedURLs: string[] = [];
+        for (const asin of [...new Set(modelASINs)]) {
+          const candidate = candidates.get(asin);
+          if (candidate) rankedURLs.push(candidate.url);
+        }
+        if (rankedURLs.length < 8)
+          for (const candidate of candidateList)
+            if (rankedURLs.length < 8 && !rankedURLs.includes(candidate.url)) rankedURLs.push(candidate.url);
+        send("action", {
+          label: `Opening ${Math.min(8, rankedURLs.length)} model-selected product links in parallel`,
+          actions: ++actions,
+          status: "done",
+        });
+        const inspected = await inspectAmazonURLs(rankedURLs.slice(0, 8), id);
+        const selectedURLs = inspected
+          .filter((candidate) => candidate.status === "eligible")
+          .slice(0, 5)
+          .map((candidate) => String(candidate.url));
         if (selectedURLs.length < 5) {
-          summary = `The product-selection pass found only ${selectedURLs.length} eligible distinct products, so checkout did not start.`;
+          summary = `The live search produced only ${selectedURLs.length} eligible distinct products, so checkout did not start.`;
         } else {
-          const fastCart = await addAmazonURLs(selectedURLs.slice(0, 5), id);
+          const fastCart = await addAmazonURLs(selectedURLs, id);
           if (config.amazonPurchaseAuthorized && fastCart.addedCount === 5 && fastCart.cartVerified) {
             const checkout = await fastAmazonCheckout(page!);
             if (checkout.status === "confirmed")
-              summary = "Order confirmed. Five selected llama products were added through the streamlined cart batch and Amazon displayed its order-confirmation page.";
+              summary = "Order confirmed. Five model-selected products were added and Amazon displayed its order-confirmation page.";
             else if (checkout.status === "manual_action")
-              summary = `Five selected llama products were added, but checkout stopped safely: ${checkout.detail}`;
+              summary = `Five model-selected products were added, but checkout stopped safely: ${checkout.detail}`;
             else if (checkout.status === "failed")
-              summary = "Five selected llama products were added, but Amazon reported that payment or order submission failed.";
+              summary = "Five model-selected products were added, but Amazon reported that payment or order submission failed.";
             else
-              summary = "Five selected llama products were added. Amazon is still processing payment authorization; the order state remains pending.";
+              summary = "Five model-selected products were added. Amazon is still processing payment authorization; the order state remains pending.";
             page = checkout.page;
             generalPage = checkout.page;
           } else {
             summary = fastCart.addedCount !== 5
-              ? `The streamlined cart batch completed ${fastCart.addedCount} of 5 additions, so checkout did not start.`
-              : "The live cart could not be verified as exactly the five selected products at quantity one, so checkout did not start.";
+              ? `Amazon accepted ${fastCart.addedCount} of 5 cart additions, so checkout did not start.`
+              : "Amazon did not expose five matching active-cart rows after the additions, so checkout did not start.";
           }
         }
-        await backgroundCoordinator;
-        const narrated = await runCoordinationCall(
-          "Final checkout-state inference",
-          "You are the final response stage of an Amazon shopping agent. Restate the supplied verified browser result in one concise sentence. Preserve whether the order was confirmed, failed, remained pending, or stopped for manual action. Do not add facts or expose any address, payment, credential, or private session detail.",
-          summary,
-          180,
-        );
-        if (narrated && !/1237|arques|94085|csk-|fw_/i.test(narrated)) summary = narrated;
       }
+      const narrated = await runCoordinationCall(
+        "Final checkout-state inference",
+        "You are the final response stage of an Amazon shopping agent. Restate the supplied verified browser result in one concise sentence. Preserve whether the order was confirmed, failed, remained pending, or stopped for manual action. Do not add facts or expose any address, payment, credential, or private session detail.",
+        summary,
+        180,
+      );
+      if (narrated && !/1237|arques|94085|csk-|fw_/i.test(narrated)) summary = narrated;
     }
     for (let turn = 0; !summary; turn++) {
       signal.throwIfAborted();
