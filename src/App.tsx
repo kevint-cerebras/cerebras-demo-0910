@@ -4,13 +4,10 @@ import {
   ArrowRight,
   Check,
   Code2,
-  Globe2,
   Menu,
-  MessageCircle,
   Mic,
   Plus,
   Square,
-  Zap,
 } from "lucide-react";
 import {
   AssistantRuntimeProvider,
@@ -559,11 +556,6 @@ export default function App() {
                       {voice.listening ? "Listening…" : voice.voiceError}
                     </div>
                   )}
-                  <nav className="demo-assistant-nav" aria-label="Demo status">
-                    <span className="active"><MessageCircle size={18} /><b>Chat</b></span>
-                    <span><Globe2 size={18} /><b>{dash.metrics.pages} pages</b></span>
-                    <span><Zap size={18} /><b>{dash.metrics.modelCalls} calls</b></span>
-                  </nav>
                 </div>
               </aside>
             </div>
