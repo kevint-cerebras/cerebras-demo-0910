@@ -848,7 +848,7 @@ export async function executeGeneral(
   let actions = 0;
   let modelCallsStarted = 0;
   let summary = "";
-  let backgroundCoordinator: Promise<void> | undefined;
+  let backgroundCoordinator: Promise<string | undefined> | undefined;
   let orderSubmissionPending = false;
   let page: Page | undefined;
   let pointer: { x: number; y: number } | null = null;
@@ -869,6 +869,39 @@ export async function executeGeneral(
   const messages: ChatMessage[] = [...conversation, { role: "user", content: prompt }];
   const send = (type: string, data: Record<string, unknown> = {}) =>
     emit({ type, id, at: performance.now() - start, ...data });
+  const runCoordinationCall = async (
+    label: string,
+    system: string,
+    content: string,
+    maxCompletionTokens = 180,
+  ) => {
+    const callNumber = ++modelCallsStarted;
+    send("inference-start", { call: callNumber });
+    try {
+      const step = await modelStep(
+        [{ role: "user", content }],
+        () => {},
+        signal,
+        true,
+        { system, maxCompletionTokens },
+      );
+      timings.push(step.timing);
+      recordSpan({ name: label, category: "model", duration: step.timing.total });
+      send("inference", { call: callNumber, timing: step.timing });
+      const finish = step.calls.find((call) => call.function.name === "finish");
+      if (!finish) return undefined;
+      const args = JSON.parse(finish.function.arguments) as { summary?: unknown };
+      return typeof args.summary === "string" ? args.summary.trim() : undefined;
+    } catch (error) {
+      if (!signal.aborted)
+        send("action", {
+          label: `${label} skipped: ${friendlyBrowserError(error instanceof Error ? error.message : "provider error")}`,
+          actions,
+          status: "error",
+        });
+      return undefined;
+    }
+  };
   const capturePage = async (
     capturedPage: Page,
     label: string,
@@ -1061,6 +1094,59 @@ export async function executeGeneral(
     page = cartPage;
     generalPage = cartPage;
     tabWork.set(cartPage, "ready");
+    const expectedASINs = new Set(urls.map(amazonASIN).filter((asin): asin is string => Boolean(asin)));
+    const cartItems = cartPage.locator(
+      '.sc-list-item[data-asin]:not([data-asin=""]), [data-name="Active Items"] [data-asin]:not([data-asin=""])',
+    );
+    // Remove stale test items and normalize selected products to quantity one.
+    // This is part of the already-authorized cart operation and prevents an old
+    // persistent-profile cart from leaking into a real checkout.
+    const initialCartASINs = await cartItems.evaluateAll((items) => [
+      ...new Set(items.map((item) => (item.getAttribute("data-asin") || "").toUpperCase()).filter(Boolean)),
+    ]);
+    for (const asin of initialCartASINs) {
+      const item = cartPage.locator(
+        `.sc-list-item[data-asin="${asin}"], [data-name="Active Items"] [data-asin="${asin}"]`,
+      ).first();
+      if (!expectedASINs.has(asin)) {
+        const remove = item.locator(
+          'input[value="Delete"], input[data-action="delete"], button[aria-label*="Delete" i], button:has-text("Delete")',
+        ).first();
+        if (await remove.isVisible().catch(() => false)) {
+          const mutation = cartPage.waitForResponse(
+            (response) => response.request().method() === "POST" && /cart/i.test(response.url()),
+            { timeout: 4000 },
+          ).catch(() => null);
+          await remove.click({ timeout: 4000, noWaitAfter: true });
+          await mutation;
+        }
+        continue;
+      }
+      const quantity = item.locator('select[name^="quantity"], select[aria-label*="Quantity" i]').first();
+      if (await quantity.count()) {
+        const current = await quantity.inputValue().catch(() => "1");
+        if (current !== "1") {
+          await quantity.selectOption("1").catch(() => {});
+          await cartPage.waitForTimeout(250);
+        }
+      }
+    }
+    await cartPage.waitForTimeout(350);
+    const normalizedCart = await cartPage.locator(
+      '.sc-list-item[data-asin]:not([data-asin=""]), [data-name="Active Items"] [data-asin]:not([data-asin=""])',
+    ).evaluateAll((items) => {
+      const unique = new Map<string, string>();
+      for (const item of items) {
+        const asin = (item.getAttribute("data-asin") || "").toUpperCase();
+        if (!asin || unique.has(asin)) continue;
+        const select = item.querySelector('select[name^="quantity"], select[aria-label*="Quantity" i]') as HTMLSelectElement | null;
+        unique.set(asin, select?.value || "1");
+      }
+      return [...unique.entries()].map(([asin, quantity]) => ({ asin, quantity }));
+    });
+    const cartVerified =
+      normalizedCart.length === expectedASINs.size &&
+      [...expectedASINs].every((asin) => normalizedCart.some((item) => item.asin === asin && item.quantity === "1"));
     const cart = await read();
     await capturePage(cartPage, "Amazon cart verification", toolCallId);
     await Promise.all(
@@ -1071,6 +1157,8 @@ export async function executeGeneral(
     return {
       additions: addResults,
       addedCount: addResults.filter((result) => result.added).length,
+      cartVerified,
+      normalizedCart,
       cart,
     };
   };
@@ -1093,18 +1181,25 @@ export async function executeGeneral(
       }
       return null;
     };
-    const checkoutDeadline = Date.now() + 60_000;
+    const checkoutDeadline = Date.now() + 120_000;
     for (let step = 0; step < 12; step++) {
       signal.throwIfAborted();
       const url = activePage.url();
       const text = await activePage.locator("body").innerText({ timeout: 5000 }).catch(() => "");
       if (/\/gp\/buy\/thankyou|order (?:has been|is) (?:placed|confirmed)|thank you.*order/i.test(`${url}\n${text}`))
-        return { status: "confirmed" as const, page: activePage, detail: "Amazon order confirmation is visible." };
+        {
+          orderSubmissionPending = false;
+          return { status: "confirmed" as const, page: activePage, detail: "Amazon order confirmation is visible." };
+        }
       if (/\/ap\/signin|captcha|enter (?:the )?(?:one-time|verification) code|\botp\b|passkey|approve.*bank app/i.test(`${url}\n${text}`))
-        return { status: "manual_action" as const, page: activePage, detail: "Amazon requires login, CAPTCHA, OTP, passkey, or bank approval." };
+        {
+          orderSubmissionPending = false;
+          return { status: "manual_action" as const, page: activePage, detail: "Amazon requires login, CAPTCHA, OTP, passkey, or bank approval." };
+        }
       if (submitted) {
         const state = classifyAmazonOrderState(url, text);
         if (state !== "pending") {
+          orderSubmissionPending = false;
           await capturePage(activePage, `Amazon order ${state.replace("_", " ")}`, id).catch(() => {});
           return { status: state, page: activePage, detail: `Amazon order state: ${state}.` };
         }
@@ -1118,7 +1213,17 @@ export async function executeGeneral(
       }
       let next: Awaited<ReturnType<typeof control>> = null;
       let label = "";
-      if (/\/cart(?:\/|\?|$)|\/gp\/cart/i.test(url)) {
+      // Inspect the real final-submit control before generic section text. A
+      // review page contains address and payment headings too.
+      const finalOrder = await control([/^place your order/i, /^confirm order/i, /^submit order/i]);
+      if (finalOrder) {
+        if (!/sunnyvale|94085/i.test(text))
+          return { status: "manual_action" as const, page: activePage, detail: "The final-review delivery destination could not be verified as Sunnyvale." };
+        next = finalOrder;
+        label = "Placing authorized order";
+        submitted = true;
+        orderSubmissionPending = true;
+      } else if (/\/cart(?:\/|\?|$)|\/gp\/cart/i.test(url)) {
         next = await control([/proceed to checkout/i]);
         label = "Proceeding to checkout";
       } else if (/shipping address|choose.*address|deliver to this address|use this address/i.test(text)) {
@@ -1131,10 +1236,6 @@ export async function executeGeneral(
           return { status: "manual_action" as const, page: activePage, detail: "No usable saved payment method was visible." };
         next = await control([/use this payment method/i, /^continue$/i, /continue to review/i]);
         label = "Using saved payment method";
-      } else if (/place your order|review your order|order total/i.test(text)) {
-        next = await control([/^place your order/i, /^confirm order/i, /^submit order/i]);
-        label = "Placing authorized order";
-        submitted = Boolean(next);
       } else {
         next = await control([/use this delivery option/i, /^continue$/i, /continue to (?:payment|review)/i]);
         label = "Advancing checkout";
@@ -1201,38 +1302,15 @@ export async function executeGeneral(
         .filter((url) => Boolean(amazonASIN(url)))
         .slice(0, 6);
       if (fixedLlamaRun && preloadedProductURLs.length >= 5) {
-        // Keep one genuine Cerebras call in the demo for request coordination,
-        // but run it beside the deterministic browser work so inference adds no
-        // serial latency and cannot trigger search/cart retry loops.
-        send("inference-start", { call: ++modelCallsStarted });
-        backgroundCoordinator = modelStep(
-          [{
-            role: "user",
-            content: "A deterministic Amazon harness is adding five preloaded llama products and completing the authorized checkout. Call finish with one short sentence describing that plan; do not request browser actions.",
-          }],
-          () => {},
-          signal,
-          true,
-          {
-            system: "You are the single lightweight coordination call for a latency demo. Call finish immediately with a concise plan sentence. Do not claim that an order has completed.",
-            maxCompletionTokens: 120,
-          },
-        ).then((step) => {
-          timings.push(step.timing);
-          recordSpan({
-            name: "Parallel coordinator inference",
-            category: "model",
-            duration: step.timing.total,
-          });
-          send("inference", { call: 1, timing: step.timing });
-        }).catch((error) => {
-          if (!signal.aborted)
-            send("action", {
-              label: `Coordinator call skipped: ${friendlyBrowserError(error instanceof Error ? error.message : "provider error")}`,
-              actions,
-              status: "error",
-            });
-        });
+        // Three small, real model calls make the reasoning visible without
+        // returning to an open-ended, many-turn browser loop. Intent inference
+        // overlaps the parallel product inspection below.
+        backgroundCoordinator = runCoordinationCall(
+          "Intent and constraint inference",
+          "You are the request-planning stage of a fast Amazon shopping agent. Call finish immediately with one concise sentence describing the requested item category, quantity, price constraints, and whether checkout is authorized. Never expose private address or payment details and do not claim completion.",
+          prompt,
+          160,
+        );
         for (const tab of generalContext!.pages()) {
           if (!preloadedProductURLs.includes(tab.url())) continue;
           registerTabs(tab);
@@ -1240,28 +1318,55 @@ export async function executeGeneral(
           tabWork.set(tab, "ready");
         }
         send("action", {
-          label: "Five preloaded llama tabs selected",
+          label: "Analyzing preloaded product tabs in parallel",
           actions: ++actions,
           status: "done",
         });
-        const firstTab = generalContext!.pages().find((tab) => tab.url() === preloadedProductURLs[0]);
-        if (firstTab) await showWorkerProgress(firstTab, "Opening five preloaded llama products", id);
-        const fastCart = await addAmazonURLs(preloadedProductURLs.slice(0, 5), id);
-        if (config.amazonPurchaseAuthorized && fastCart.addedCount === 5) {
-          const checkout = await fastAmazonCheckout(page!);
-          if (checkout.status === "confirmed")
-            summary = "Order confirmed. Five preloaded llama products were added through the streamlined cart batch and Amazon displayed its order-confirmation page.";
-          else if (checkout.status === "manual_action")
-            summary = `Five preloaded llama products were added, but checkout stopped safely: ${checkout.detail}`;
-          else if (checkout.status === "failed")
-            summary = "Five preloaded llama products were added, but Amazon reported that payment or order submission failed.";
-          else
-            summary = "Five preloaded llama products were added. Amazon is still processing payment authorization; the order state remains pending.";
-          page = checkout.page;
-          generalPage = checkout.page;
+        const inspected = await inspectAmazonURLs(preloadedProductURLs, id);
+        const eligible = inspected.filter((candidate) => candidate.status === "eligible");
+        const selection = await runCoordinationCall(
+          "Product selection inference",
+          "You are the product-selection stage of a fast Amazon shopping agent. Review the supplied structured candidates, choose exactly five distinct eligible products that best match the user's request, and call finish with only a JSON array containing their canonical URLs. Do not request more browsing and do not include commentary.",
+          JSON.stringify({ request: prompt, candidates: inspected }),
+          260,
+        );
+        const eligibleURLs = new Set<string>(eligible.map((candidate) => String(candidate.url)));
+        const modelURLs: string[] = selection?.match(/https:\/\/www\.amazon\.com\/(?:dp|gp\/product)\/[A-Z0-9]{10}(?:[^"\s,\]]*)?/gi) || [];
+        const selectedURLs: string[] = [...new Set<string>(modelURLs)]
+          .filter((url) => eligibleURLs.has(url));
+        for (const candidate of eligible)
+          if (selectedURLs.length < 5 && !selectedURLs.includes(String(candidate.url)))
+            selectedURLs.push(String(candidate.url));
+        if (selectedURLs.length < 5) {
+          summary = `The product-selection pass found only ${selectedURLs.length} eligible distinct products, so checkout did not start.`;
         } else {
-          summary = `The streamlined cart batch completed ${fastCart.addedCount} of 5 additions. No additional searches or model calls were made.`;
+          const fastCart = await addAmazonURLs(selectedURLs.slice(0, 5), id);
+          if (config.amazonPurchaseAuthorized && fastCart.addedCount === 5 && fastCart.cartVerified) {
+            const checkout = await fastAmazonCheckout(page!);
+            if (checkout.status === "confirmed")
+              summary = "Order confirmed. Five selected llama products were added through the streamlined cart batch and Amazon displayed its order-confirmation page.";
+            else if (checkout.status === "manual_action")
+              summary = `Five selected llama products were added, but checkout stopped safely: ${checkout.detail}`;
+            else if (checkout.status === "failed")
+              summary = "Five selected llama products were added, but Amazon reported that payment or order submission failed.";
+            else
+              summary = "Five selected llama products were added. Amazon is still processing payment authorization; the order state remains pending.";
+            page = checkout.page;
+            generalPage = checkout.page;
+          } else {
+            summary = fastCart.addedCount !== 5
+              ? `The streamlined cart batch completed ${fastCart.addedCount} of 5 additions, so checkout did not start.`
+              : "The live cart could not be verified as exactly the five selected products at quantity one, so checkout did not start.";
+          }
         }
+        await backgroundCoordinator;
+        const narrated = await runCoordinationCall(
+          "Final checkout-state inference",
+          "You are the final response stage of an Amazon shopping agent. Restate the supplied verified browser result in one concise sentence. Preserve whether the order was confirmed, failed, remained pending, or stopped for manual action. Do not add facts or expose any address, payment, credential, or private session detail.",
+          summary,
+          180,
+        );
+        if (narrated && !/1237|arques|94085|csk-|fw_/i.test(narrated)) summary = narrated;
       }
     }
     for (let turn = 0; !summary; turn++) {
@@ -1817,7 +1922,9 @@ export async function executeGeneral(
   } catch (error) {
     send("error", {
       message: signal.aborted
-        ? "Stopped. No purchase was made."
+        ? orderSubmissionPending
+          ? "The order was submitted, but confirmation is still pending. Check the visible Amazon page before retrying; do not submit a duplicate order."
+          : "Stopped before order submission."
         : error instanceof Error
           ? friendlyBrowserError(error.message)
           : "Browser task failed.",
