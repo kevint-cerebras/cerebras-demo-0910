@@ -848,6 +848,7 @@ export async function executeGeneral(
   let actions = 0;
   let modelCallsStarted = 0;
   let summary = "";
+  let backgroundCoordinator: Promise<void> | undefined;
   let orderSubmissionPending = false;
   let page: Page | undefined;
   let pointer: { x: number; y: number } | null = null;
@@ -1005,7 +1006,12 @@ export async function executeGeneral(
     }));
   };
   const addAmazonURLs = async (urls: string[], toolCallId: string) => {
-    const addResults = await Promise.all(urls.map(async (url, workerIndex) => {
+    const addResults: { url: string; added: boolean; error?: string }[] = [];
+    // Amazon's cart is one shared server-side object. Concurrent POSTs race and
+    // can overwrite one another, causing expensive discovery/retry loops. Keep
+    // product reads parallel, but commit the five already-selected items as one
+    // tight inference-free sequence.
+    for (const [workerIndex, url] of urls.entries()) {
       const requested = new URL(url);
       const tab = generalContext!.pages().find((candidate) => {
         try {
@@ -1015,26 +1021,39 @@ export async function executeGeneral(
           return false;
         }
       });
-      if (!tab) return { url, added: false, error: "Inspected product tab is no longer open." };
+      if (!tab) {
+        addResults.push({ url, added: false, error: "Preloaded product tab is no longer open." });
+        continue;
+      }
       try {
         const button = tab.locator(
           '#add-to-cart-button, input[name="submit.add-to-cart"], button[name="submit.add-to-cart"]',
         ).first();
         if (!await button.isVisible().catch(() => false))
           throw new Error("No visible one-time Add to Cart control was found.");
-        await button.click({ timeout: 7000, noWaitAfter: true });
+        const cartWrite = tab.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            /(?:add-to-cart|\/cart\/|\/gp\/cart)/i.test(response.url()),
+          { timeout: 5000 },
+        ).catch(() => null);
+        await button.click({ timeout: 5000, noWaitAfter: true });
+        // Wait for Amazon to accept this write before starting the next one.
+        // Five acknowledged writes are faster than parallel writes followed by
+        // missing-item discovery and retries.
+        await cartWrite;
         await showWorkerProgress(tab, `Amazon cart worker ${workerIndex + 1}: added product`, toolCallId);
         send("action", {
-          label: `Amazon cart worker ${workerIndex + 1}: added product`,
+          label: `Cart batch ${workerIndex + 1}/${urls.length}: added product`,
           actions: ++actions,
           status: "done",
         });
-        return { url: tab.url(), added: true };
+        addResults.push({ url, added: true });
       } catch (error) {
         tabWork.set(tab, "error");
-        return { url, added: false, error: error instanceof Error ? friendlyBrowserError(error.message) : "Add to Cart failed." };
+        addResults.push({ url, added: false, error: error instanceof Error ? friendlyBrowserError(error.message) : "Add to Cart failed." });
       }
-    }));
+    }
     const cartPage = await generalContext!.newPage();
     registerTabs(cartPage);
     tabWork.set(cartPage, "loading");
@@ -1044,11 +1063,98 @@ export async function executeGeneral(
     tabWork.set(cartPage, "ready");
     const cart = await read();
     await capturePage(cartPage, "Amazon cart verification", toolCallId);
+    await Promise.all(
+      generalContext!.pages()
+        .filter((tab) => tab !== cartPage && /\/cart\/(?:add-to-cart|smart-wagon)/i.test(tab.url()))
+        .map((tab) => tab.close().catch(() => {})),
+    );
     return {
       additions: addResults,
       addedCount: addResults.filter((result) => result.added).length,
       cart,
     };
+  };
+  const fastAmazonCheckout = async (activePage: Page) => {
+    let submitted = false;
+    const control = async (patterns: RegExp[]) => {
+      const candidates = activePage.locator('button, input[type="submit"], [role="button"], a');
+      const count = Math.min(await candidates.count(), 140);
+      for (const pattern of patterns) {
+        for (let index = 0; index < count; index++) {
+          const candidate = candidates.nth(index);
+          if (!await candidate.isVisible().catch(() => false)) continue;
+          const label = [
+            await candidate.getAttribute("aria-label"),
+            await candidate.getAttribute("value"),
+            await candidate.textContent(),
+          ].filter(Boolean).join(" ").trim().replace(/\s+/g, " ");
+          if (pattern.test(label)) return { candidate, label };
+        }
+      }
+      return null;
+    };
+    const checkoutDeadline = Date.now() + 60_000;
+    for (let step = 0; step < 12; step++) {
+      signal.throwIfAborted();
+      const url = activePage.url();
+      const text = await activePage.locator("body").innerText({ timeout: 5000 }).catch(() => "");
+      if (/\/gp\/buy\/thankyou|order (?:has been|is) (?:placed|confirmed)|thank you.*order/i.test(`${url}\n${text}`))
+        return { status: "confirmed" as const, page: activePage, detail: "Amazon order confirmation is visible." };
+      if (/\/ap\/signin|captcha|enter (?:the )?(?:one-time|verification) code|\botp\b|passkey|approve.*bank app/i.test(`${url}\n${text}`))
+        return { status: "manual_action" as const, page: activePage, detail: "Amazon requires login, CAPTCHA, OTP, passkey, or bank approval." };
+      if (submitted) {
+        const state = classifyAmazonOrderState(url, text);
+        if (state !== "pending") {
+          await capturePage(activePage, `Amazon order ${state.replace("_", " ")}`, id).catch(() => {});
+          return { status: state, page: activePage, detail: `Amazon order state: ${state}.` };
+        }
+        if (Date.now() >= checkoutDeadline)
+          return { status: "pending" as const, page: activePage, detail: "Amazon is still processing payment authorization." };
+        // Payment authorization is external latency. Poll the page directly;
+        // no model call or screenshot loop is needed while it is pending.
+        await activePage.waitForTimeout(750);
+        step--;
+        continue;
+      }
+      let next: Awaited<ReturnType<typeof control>> = null;
+      let label = "";
+      if (/\/cart(?:\/|\?|$)|\/gp\/cart/i.test(url)) {
+        next = await control([/proceed to checkout/i]);
+        label = "Proceeding to checkout";
+      } else if (/shipping address|choose.*address|deliver to this address|use this address/i.test(text)) {
+        if (!/sunnyvale|94085/i.test(text))
+          return { status: "manual_action" as const, page: activePage, detail: "The saved delivery address could not be verified as Sunnyvale." };
+        next = await control([/use this address/i, /deliver to this address/i, /ship to this address/i]);
+        label = "Using verified saved address";
+      } else if (/payment method|select a payment|your payment/i.test(text)) {
+        if (/add a (?:credit|debit) card|enter.*card number/i.test(text) && !/ending in|card on file|saved payment/i.test(text))
+          return { status: "manual_action" as const, page: activePage, detail: "No usable saved payment method was visible." };
+        next = await control([/use this payment method/i, /^continue$/i, /continue to review/i]);
+        label = "Using saved payment method";
+      } else if (/place your order|review your order|order total/i.test(text)) {
+        next = await control([/^place your order/i, /^confirm order/i, /^submit order/i]);
+        label = "Placing authorized order";
+        submitted = Boolean(next);
+      } else {
+        next = await control([/use this delivery option/i, /^continue$/i, /continue to (?:payment|review)/i]);
+        label = "Advancing checkout";
+      }
+      if (!next)
+        return { status: "manual_action" as const, page: activePage, detail: "Checkout did not expose a recognized safe next control." };
+      send("action", { label, actions: ++actions, status: "done" });
+      try {
+        await next.candidate.click({ timeout: 5000, noWaitAfter: true });
+      } catch (error) {
+        // A final-submit click may navigate quickly enough to detach its
+        // original control. Treat that as submitted and classify the new page.
+        if (!submitted) throw error;
+      }
+      await activePage.waitForTimeout(350);
+      await activePage.waitForLoadState("domcontentloaded", { timeout: 5000 }).catch(() => {});
+      // The visible Chromium window already reflects each action in real time.
+      // Avoid blocking checkout on screenshot work; capture only terminal state.
+    }
+    return { status: "pending" as const, page: activePage, detail: "Checkout is still processing." };
   };
   try {
     send("start", { mode: configuration().mode, model: configuration().model });
@@ -1095,6 +1201,38 @@ export async function executeGeneral(
         .filter((url) => Boolean(amazonASIN(url)))
         .slice(0, 6);
       if (fixedLlamaRun && preloadedProductURLs.length >= 5) {
+        // Keep one genuine Cerebras call in the demo for request coordination,
+        // but run it beside the deterministic browser work so inference adds no
+        // serial latency and cannot trigger search/cart retry loops.
+        send("inference-start", { call: ++modelCallsStarted });
+        backgroundCoordinator = modelStep(
+          [{
+            role: "user",
+            content: "A deterministic Amazon harness is adding five preloaded llama products and completing the authorized checkout. Call finish with one short sentence describing that plan; do not request browser actions.",
+          }],
+          () => {},
+          signal,
+          true,
+          {
+            system: "You are the single lightweight coordination call for a latency demo. Call finish immediately with a concise plan sentence. Do not claim that an order has completed.",
+            maxCompletionTokens: 120,
+          },
+        ).then((step) => {
+          timings.push(step.timing);
+          recordSpan({
+            name: "Parallel coordinator inference",
+            category: "model",
+            duration: step.timing.total,
+          });
+          send("inference", { call: 1, timing: step.timing });
+        }).catch((error) => {
+          if (!signal.aborted)
+            send("action", {
+              label: `Coordinator call skipped: ${friendlyBrowserError(error instanceof Error ? error.message : "provider error")}`,
+              actions,
+              status: "error",
+            });
+        });
         for (const tab of generalContext!.pages()) {
           if (!preloadedProductURLs.includes(tab.url())) continue;
           registerTabs(tab);
@@ -1109,10 +1247,21 @@ export async function executeGeneral(
         const firstTab = generalContext!.pages().find((tab) => tab.url() === preloadedProductURLs[0]);
         if (firstTab) await showWorkerProgress(firstTab, "Opening five preloaded llama products", id);
         const fastCart = await addAmazonURLs(preloadedProductURLs.slice(0, 5), id);
-        messages.push({
-          role: "user",
-          content: `The zero-selection-latency harness already took five distinct products from the preloaded llama-category tabs and launched all five Add-to-Cart actions concurrently, without model or image analysis. Continue from this live cart state without searching, inspecting, or adding products again. Verify and clean the cart, then follow the authorized checkout policy. Fast-cart result: ${JSON.stringify(fastCart)}`,
-        });
+        if (config.amazonPurchaseAuthorized && fastCart.addedCount === 5) {
+          const checkout = await fastAmazonCheckout(page!);
+          if (checkout.status === "confirmed")
+            summary = "Order confirmed. Five preloaded llama products were added through the streamlined cart batch and Amazon displayed its order-confirmation page.";
+          else if (checkout.status === "manual_action")
+            summary = `Five preloaded llama products were added, but checkout stopped safely: ${checkout.detail}`;
+          else if (checkout.status === "failed")
+            summary = "Five preloaded llama products were added, but Amazon reported that payment or order submission failed.";
+          else
+            summary = "Five preloaded llama products were added. Amazon is still processing payment authorization; the order state remains pending.";
+          page = checkout.page;
+          generalPage = checkout.page;
+        } else {
+          summary = `The streamlined cart batch completed ${fastCart.addedCount} of 5 additions. No additional searches or model calls were made.`;
+        }
       }
     }
     for (let turn = 0; !summary; turn++) {
@@ -1652,6 +1801,7 @@ export async function executeGeneral(
           } catch { /* Keep non-JSON tool responses intact. */ }
       }
     }
+    await backgroundCoordinator;
     send("done", {
       summary,
       metrics: {

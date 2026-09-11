@@ -177,7 +177,9 @@ export function useDash() {
           runRef.current = event.id as string;
           setMetrics((m) => ({
             ...m,
-            modelCalls: event.mode === "local" ? 0 : 1,
+            // A provider-backed run may still take the deterministic zero-call
+            // path. inference-start is the source of truth for live call count.
+            modelCalls: 0,
             pages: 3,
           }));
           break;
