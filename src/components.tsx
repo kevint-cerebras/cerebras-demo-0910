@@ -30,6 +30,19 @@ import type {
   StoreId,
 } from "../shared/types";
 import type { ActionLog, StageState } from "./useDash";
+import museOfficialLogo from "./assets/muse-logo-official.png";
+
+export function MuseAvatar({ large = false }: { large?: boolean }) {
+  return (
+    <span
+      className={`muse-avatar${large ? " muse-avatar-large" : ""}`}
+      role="img"
+      aria-label="Muse"
+    >
+      <img src={museOfficialLogo} alt="" aria-hidden="true" />
+    </span>
+  );
+}
 
 export function DashMark({ small = false }: { small?: boolean }) {
   return (
@@ -190,7 +203,7 @@ export function BrowserView({
             <p>
               {running
                 ? "Working in the browser."
-                : "Watch Dash navigate and take action here."}
+                : "Watch Muse navigate and take action here."}
             </p>
             <div className="placeholder-stores">
               {stores.map((s) => (

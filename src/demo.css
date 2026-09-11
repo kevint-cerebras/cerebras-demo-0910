@@ -901,6 +901,14 @@ body:has(.demo-app.muse-skin) {
   display: inline-flex;
 }
 
+.demo-app .assistant-response-label .muse-avatar {
+  width: 22px;
+  height: 22px;
+  margin: -4px 0;
+  border-radius: 28%;
+  filter: none;
+}
+
 .aui-browser-tool {
   padding: 11px 13px;
   border: 1px solid #e5e6e8;

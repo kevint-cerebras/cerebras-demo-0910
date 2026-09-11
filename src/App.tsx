@@ -20,10 +20,9 @@ import { InteractivePreview } from "./InteractivePreview";
 import { useDash } from "./useDash";
 import { useVoice } from "./useVoice";
 import { DashMessages, DashToolContext } from "./AssistantThread";
-import { BrowserView, DashMark, TimingPanel } from "./components";
+import { BrowserView, MuseAvatar, TimingPanel } from "./components";
 import ApprovalModal from "./ApprovalModal";
 import { getStore, money } from "../shared/catalog";
-import museOfficialLogo from "./assets/muse-logo-official.png";
 
 function browserPageLabel(page: { url: string; title: string } | null) {
   if (!page) return "Loading homepage…";
@@ -33,18 +32,6 @@ function browserPageLabel(page: { url: string; title: string } | null) {
       return `${page.title || "Local site"} · localhost`;
   } catch { /* The page can be opening its first URL. */ }
   return page.url;
-}
-
-function MuseAvatar({ large = false }: { large?: boolean }) {
-  return (
-    <span
-      className={`muse-avatar${large ? " muse-avatar-large" : ""}`}
-      role="img"
-      aria-label="Muse"
-    >
-      <img src={museOfficialLogo} alt="" aria-hidden="true" />
-    </span>
-  );
 }
 
 export default function App() {
@@ -323,7 +310,7 @@ export default function App() {
                 : "Ready for your approval",
         }}
       >
-        <div className={`demo-app${isAmazon ? " muse-skin" : ""}`} data-assistant-ui="external-store-runtime">
+        <div className="demo-app muse-skin" data-assistant-ui="external-store-runtime">
           <header className="demo-header">
             <button
               type="button"
@@ -334,8 +321,8 @@ export default function App() {
               <Menu size={19} />
             </button>
             <div className="demo-brand">
-              {isAmazon ? <MuseAvatar /> : <DashMark small />}
-              <strong>{isAmazon ? "Muse" : "Dash"}</strong>
+              <MuseAvatar />
+              <strong>Muse</strong>
             </div>
             <div className="demo-header-state">
                 <button
@@ -445,7 +432,7 @@ export default function App() {
               </main>
               <aside className="demo-assistant">
                 <div className="demo-panel-title">
-                  <span>{isAmazon ? <MuseAvatar /> : <DashMark small />}<b>{isAmazon ? "Muse" : "Dash"}</b></span>
+                  <span><MuseAvatar /><b>Muse</b></span>
                   <small>
                     <i />
                     {dash.running
@@ -470,12 +457,12 @@ export default function App() {
                     <DashMessages />
                   ) : (
                     <div className="demo-intro">
-                      {isAmazon ? <MuseAvatar large /> : <DashMark />}
-                      <h2>{isAmazon ? "What can Muse do for you?" : "What should I find?"}</h2>
+                      <MuseAvatar large />
+                      <h2>What can Muse do for you?</h2>
                       <p>
                         {isAmazon
                           ? "Ask me to browse Amazon, compare products, and take care of your shopping."
-                          : "Give Dash a Marketplace research request, then watch it inspect listings and photos in the live browser."}
+                          : "Ask me to research Marketplace listings, compare the options, and return the best matches."}
                       </p>
                       <p className="demo-fine">
                         {isAmazon
@@ -507,8 +494,8 @@ export default function App() {
                     </button>
                     <ComposerPrimitive.Input
                       ref={composerInput}
-                      aria-label={isAmazon ? "Ask Muse to use Amazon" : "Ask Dash to use the browser"}
-                      placeholder={isAmazon ? "Message Muse" : "Message Dash about Marketplace"}
+                      aria-label={isAmazon ? "Ask Muse to use Amazon" : "Ask Muse to use Marketplace"}
+                      placeholder="Message Muse"
                       onChange={(e) => {
                         const text = e.target.value;
                         queueMicrotask(() => setInput(text));
@@ -520,7 +507,7 @@ export default function App() {
                     />
                     {dash.running ? (
                       <ComposerPrimitive.Cancel asChild>
-                        <button className="demo-submit" aria-label={isAmazon ? "Stop Muse" : "Stop Dash"}>
+                        <button className="demo-submit" aria-label="Stop Muse">
                           <Square size={13} />
                         </button>
                       </ComposerPrimitive.Cancel>

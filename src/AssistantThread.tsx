@@ -6,7 +6,7 @@ import {
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import { LoaderCircle } from "lucide-react";
-import { DashMark } from "./components";
+import { MuseAvatar } from "./components";
 
 export const DashToolContext = createContext<{
   content: ReactNode;
@@ -45,7 +45,7 @@ function AssistantMessage() {
   return (
     <MessagePrimitive.Root data-testid="aui-assistant-message">
       <div className="assistant-response-label">
-        <DashMark small />
+        <MuseAvatar />
         <span>{label}</span>
         {busy && <LoaderCircle size={12} className="spin" />}
       </div>

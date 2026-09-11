@@ -1,6 +1,6 @@
-# Dash Marketplace and Amazon Demos
+# Muse Marketplace and Amazon Demos
 
-A local React + Playwright browser-agent harness with separate Facebook Marketplace research and Amazon cart-preparation modes. The live browser occupies 75% of the workspace and the Dash chat occupies 25%.
+A local React + Playwright browser-agent harness with separate Facebook Marketplace research and Amazon cart-preparation modes. Both run in the Muse interface, with the live browser occupying 75% of the workspace and Muse chat occupying 25%.
 
 The hidden Marketplace brief asks the model to inspect every photo for plausible goose-statue listings, verify a pixel-visible open beak, verify shipping to Sunnyvale, CA 94085, and stop immediately after two qualified listings. The visible composer is intentionally blank and accepts the presenter’s natural-language request.
 
@@ -29,11 +29,11 @@ npm run marketplace:fireworks
 
 ## Amazon shopping demo
 
-The Amazon mode uses a separate ignored persistent profile at `.browser-profile/amazon`, so Amazon and Facebook sessions do not mix. Dash searches, adds selected products to the cart, verifies the live cart, and returns product links, prices, quantities, and the visible subtotal. Optional demo-specific constraints belong in the ignored `AMAZON_EPHEMERAL_BRIEF` value and are appended to the model instructions at runtime without being returned to the browser UI.
+The Amazon mode uses a separate ignored persistent profile at `.browser-profile/amazon`, so Amazon and Facebook sessions do not mix. Muse searches, adds selected products to the cart, verifies the live cart, and returns product links, prices, quantities, and the visible subtotal. Optional demo-specific constraints belong in the ignored `AMAZON_EPHEMERAL_BRIEF` value and are appended to the model instructions at runtime without being returned to the browser UI.
 
-Real ordering is disabled by default. A specifically authorized local session may set `AMAZON_PURCHASE_AUTHORIZED=true` only in its ignored `.env`. In that mode, after verifying the exact cart and final review, Dash may submit the order using an already-saved payment method and a saved address matching the private destination. It still cannot type credentials, address data, or payment data, and it stops for login, CAPTCHA, OTP, missing/mismatched checkout details, price violations, or an ambiguous final state. The confirmation response omits private address and payment information.
+Real ordering is disabled by default. A specifically authorized local session may set `AMAZON_PURCHASE_AUTHORIZED=true` only in its ignored `.env`. In that mode, after verifying the exact cart and final review, Muse may submit the order using an already-saved payment method and a saved address matching the private destination. It still cannot type credentials, address data, or payment data, and it stops for login, CAPTCHA, OTP, missing/mismatched checkout details, price violations, or an ambiguous final state. The confirmation response omits private address and payment information.
 
-Amazon product research is parallelized: after one search exposes candidate links, Dash opens 5–10 product tabs and gives every tab an independent one-shot Qwen vision worker. Eligible products are returned to the coordinator together, and the five selected Add-to-Cart actions run concurrently before one live cart-verification pass. Worker tabs appear immediately and rotate through the embedded preview as they load, capture, finish, and add products.
+Amazon product research is parallelized: after one search exposes candidate links, Muse opens 5–10 product tabs and gives every tab an independent one-shot Qwen vision worker. Eligible products are returned to the coordinator together, and the five selected Add-to-Cart actions run concurrently before one live cart-verification pass. Worker tabs appear immediately and rotate through the embedded preview as they load, capture, finish, and add products.
 
 Launch with Cerebras:
 
@@ -47,7 +47,7 @@ Launch with Fireworks:
 npm run amazon:fireworks
 ```
 
-The launcher opens the Dash controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive embedded browser to log into the active shopping site if needed. The browser does not initiate a run by itself: type the request in the Dash controller and press **Run**. Do not run two demo commands at once; they share port 3100 but use separate persistent browser profiles.
+The launcher opens the Muse controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive embedded browser to log into the active shopping site if needed. The browser does not initiate a run by itself: type the request in Muse and press **Run**. Do not run two demo commands at once; they share port 3100 but use separate persistent browser profiles.
 
 The browser is embedded in the 75%-width side of the Muse interface by default. It runs headlessly at the process level but remains visible and interactive in Muse. The launcher deliberately ignores a stale `BROWSER_HEADLESS=false` exported by an earlier shell command. To explicitly request a separate native window, run with `BROWSER_VIEW=native`.
 
@@ -59,7 +59,7 @@ My friend Qi is an avid collector of statues of geese. Look for all geese statue
 
 The fixed brief behind the composer narrows the output to two verified matches and requires the final answer to include clickable listing links, prices, locations, photo evidence, and shipping evidence.
 
-After Dash collects plausible search-result links, it fans out up to ten independent Qwen workers concurrently. Each worker owns one Facebook Marketplace tab in the shared logged-in context, evaluates only the first listing screenshot, verifies open-beak pixels and Sunnyvale shipping, and returns a structured verdict with a single vision call. This deliberately trades gallery coverage for minimum demo latency. The parent coordinator gathers every verdict and always calls the final-answer tool with the best two matches or an explicit blocker result.
+After Muse collects plausible search-result links, it fans out up to ten independent Qwen workers concurrently. Each worker owns one Facebook Marketplace tab in the shared logged-in context, evaluates only the first listing screenshot, verifies open-beak pixels and Sunnyvale shipping, and returns a structured verdict with a single vision call. This deliberately trades gallery coverage for minimum demo latency. The parent coordinator gathers every verdict and always calls the final-answer tool with the best two matches or an explicit blocker result.
 
 Worker tabs appear in the Muse tab strip as soon as they are created. While processing continues concurrently, the embedded browser rotates through individual worker tabs as their first photos are captured and judged; the status line identifies the worker currently on screen. The always-visible elapsed-time counter is omitted from the presentation UI.
 

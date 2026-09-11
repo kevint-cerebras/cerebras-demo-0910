@@ -50,7 +50,7 @@ export default function ApprovalModal({
         </div>
         <div className="eyebrow">YOU HAVE THE FINAL SAY</div>
         <h2>Ready to call it done?</h2>
-        <p>Review your basket before Dash places the sandbox order.</p>
+        <p>Review your basket before Muse places the sandbox order.</p>
         <div className="approval-store">
           <StoreMark store={quote.store} />
           <div>

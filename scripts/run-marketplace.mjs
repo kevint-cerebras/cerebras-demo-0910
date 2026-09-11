@@ -64,7 +64,7 @@ if (process.platform === 'darwin' && process.env.OPEN_DASH_UI !== 'false') {
           stdio: 'ignore',
         });
         opener.unref();
-        console.log(`Dash controller opened at ${dashURL} with the ${browserView} browser view`);
+        console.log(`Muse opened at ${dashURL} with the ${browserView} browser view`);
         break;
       }
     } catch {
