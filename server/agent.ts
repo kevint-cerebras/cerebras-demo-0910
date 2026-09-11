@@ -458,6 +458,33 @@ type AmazonProductVerdict = {
   reason: string;
 };
 
+function compactAmazonObservation(raw: unknown) {
+  const observation = raw && typeof raw === "object"
+    ? raw as { url?: unknown; title?: unknown; text?: unknown; elements?: unknown }
+    : {};
+  const lines = String(observation.text || "")
+    .split("\n")
+    .map((line) => line.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  const relevant = lines.filter((line) =>
+    /\b(?:llama|alpaca|price|in stock|available|unavailable|delivery|deliver|ships?|sold by|one-time|subscription|add to cart|buy now)\b|\$\s*\d/i.test(line),
+  );
+  const text = [...new Set([...lines.slice(0, 24), ...relevant])]
+    .join("\n")
+    .slice(0, 4_500);
+  const elements = Array.isArray(observation.elements)
+    ? observation.elements.filter((element) =>
+        /add to cart|buy now|one-time|subscription/i.test(JSON.stringify(element)),
+      ).slice(0, 8)
+    : [];
+  return {
+    url: String(observation.url || ""),
+    title: String(observation.title || ""),
+    text,
+    elements,
+  };
+}
+
 const amazonProductWorkerSystem = `You are one worker in a fully parallel Amazon product-inspection pool. Inspect only the product already open in this tab. For minimum latency, use ONLY its product name/title and supplied DOM text—do not request or analyze images. Determine whether the name matches the requested merchandise and every constraint in the private session brief. Verify the visible current price, availability, one-time-purchase status, and delivery eligibility from text. Reject sponsored noise, unrelated product names, subscriptions, unavailable products, and anything outside the private price range. Do not click, navigate, add to cart, check out, or expose private delivery details. Always call finish_product exactly once with a concise structured verdict.`;
 
 async function inspectAmazonProduct(
@@ -471,15 +498,17 @@ async function inspectAmazonProduct(
   const canonicalURL = productPage.url();
   const asin = amazonASIN(canonicalURL);
   const cached = asin ? amazonProductSnapshots.get(asin) : undefined;
-  const freshCache = cached && Date.now() - cached.createdAt < 5 * 60_000 ? cached : undefined;
-  const observation = freshCache?.observation || await productPage.evaluate(readPageScript);
+  const freshCache = cached && Date.now() - cached.createdAt < 30 * 60_000 ? cached : undefined;
+  const observation = compactAmazonObservation(
+    freshCache?.observation || await productPage.evaluate(readPageScript),
+  );
   await reportAction(freshCache ? "using preloaded product name" : "read product name");
   reportInferenceStart();
   const calls: ToolCall[] = [];
   const step = await modelStep(
     [{
       role: "user",
-      content: `Match this Amazon product by product name/title and text only, then return a verdict. Product URL: ${canonicalURL}\nDOM observation: ${JSON.stringify(observation).slice(0, 14000)}`,
+      content: `Match this Amazon product by product name/title and text only, then return a verdict. Product URL: ${canonicalURL}\nCompact product facts: ${JSON.stringify(observation)}`,
     }],
     (call) => calls.push(call),
     signal,
@@ -784,19 +813,19 @@ export async function warmAmazonPages() {
     );
     // Round-robin across categories so speculative product tabs are diverse
     // instead of consuming all ten slots from the first (usually plush) page.
-    for (let productIndex = 0; productIndex < 10 && uniqueProducts.size < 10; productIndex++) {
+    for (let productIndex = 0; productIndex < 10 && uniqueProducts.size < 6; productIndex++) {
       for (const products of productsBySearch) {
         const product = products[productIndex];
         if (!product) continue;
         const asin = amazonASIN(product.href);
         if (asin && !uniqueProducts.has(asin)) {
           uniqueProducts.set(asin, `https://www.amazon.com/dp/${asin}`);
-          if (uniqueProducts.size === 10) break;
+          if (uniqueProducts.size === 6) break;
         }
       }
     }
     await Promise.all(
-      [...uniqueProducts.values()].slice(0, 8).map(async (url) => {
+      [...uniqueProducts.values()].slice(0, 6).map(async (url) => {
         const pathname = new URL(url).pathname;
         const existing = context.pages().find((candidate) => {
           try {
@@ -815,7 +844,7 @@ export async function warmAmazonPages() {
           await tab.locator("body").waitFor({ state: "attached", timeout: 4000 });
           const asin = amazonASIN(tab.url());
           if (asin) {
-            const observation = await tab.evaluate(readPageScript);
+            const observation = compactAmazonObservation(await tab.evaluate(readPageScript));
             amazonProductSnapshots.set(asin, { createdAt: Date.now(), observation });
           }
           await tab.evaluate(() => window.stop()).catch(() => {});
@@ -1178,7 +1207,7 @@ export async function executeGeneral(
                   }
                   const products = [...unique.values()].slice(0, 30);
                   const inspected = products.length >= 5
-                    ? await inspectAmazonURLs(products.slice(0, 8).map((product) => product.url), call.id)
+                    ? await inspectAmazonURLs(products.slice(0, 6).map((product) => product.url), call.id)
                     : [];
                   value = {
                     products: inspected.length ? products.slice(0, 10) : products,
