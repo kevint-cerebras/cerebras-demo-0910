@@ -414,6 +414,7 @@ const amazonProductWorkerSystem = `You are one worker in a parallel Amazon produ
 async function inspectAmazonProduct(
   productPage: Page,
   signal: AbortSignal,
+  reportInferenceStart: () => void,
   reportInference: (timing: AgentCallTiming) => void,
   reportAction: (label: string) => Promise<void>,
 ): Promise<AmazonProductVerdict> {
@@ -427,6 +428,7 @@ async function inspectAmazonProduct(
     timeout: 5000,
   });
   await reportAction("captured product");
+  reportInferenceStart();
   const calls: ToolCall[] = [];
   const step = await modelStep(
     [{
@@ -784,6 +786,7 @@ export async function executeGeneral(
   const start = performance.now(),
     id = randomUUID();
   let actions = 0;
+  let modelCallsStarted = 0;
   let summary = "";
   let orderSubmissionPending = false;
   let page: Page | undefined;
@@ -850,12 +853,17 @@ export async function executeGeneral(
   };
   // Workers continue concurrently, while these short presentation updates are
   // serialized so the native window and embedded preview show one real worker.
+  // They never sit on the execution critical path.
   let livePreviewQueue = Promise.resolve();
-  const showWorkerProgress = async (
+  let lastWorkerPreview = 0;
+  const showWorkerProgress = (
     workerPage: Page,
     label: string,
     toolCallId?: string,
   ) => {
+    const now = performance.now();
+    if (now - lastWorkerPreview < 180) return Promise.resolve();
+    lastWorkerPreview = now;
     livePreviewQueue = livePreviewQueue
       .catch(() => {})
       .then(async () => {
@@ -864,7 +872,7 @@ export async function executeGeneral(
         generalPage = workerPage;
         await capturePage(workerPage, label, toolCallId);
       });
-    await livePreviewQueue.catch(() => {});
+    return Promise.resolve();
   };
   let lastGroceryPreview = 0;
   const groceries = new GroceryTools(signal, async (activePage, label, duration, category) => {
@@ -928,7 +936,7 @@ export async function executeGeneral(
     }
     for (let turn = 0; !summary; turn++) {
       signal.throwIfAborted();
-      send("inference-start", { call: turn + 1 });
+      send("inference-start", { call: ++modelCallsStarted });
       let queue = Promise.resolve();
       const results: { call: ToolCall; result: unknown }[] = [];
       const visionImage = await page.screenshot({
@@ -1093,6 +1101,7 @@ export async function executeGeneral(
                       const verdict = await inspectAmazonProduct(
                         tab,
                         signal,
+                        () => send("inference-start", { call: ++modelCallsStarted }),
                         (timing) => {
                           timings.push(timing);
                           send("inference", { call: timings.length, timing });
@@ -1123,7 +1132,11 @@ export async function executeGeneral(
                     eligibleCount: inspected.filter((candidate) => candidate.status === "eligible").length,
                     next: "Choose exactly five eligible distinct products and call add_amazon_products once with their URLs.",
                   };
-                  await capture(`Processed ${urls.length} Amazon products in parallel`, call.id);
+                  send("action", {
+                    label: `Processed ${urls.length} Amazon products in parallel`,
+                    actions: ++actions,
+                    status: "done",
+                  });
                 } else if (call.name === "add_amazon_products") {
                   const supplied = args.urls;
                   if (!Array.isArray(supplied) || supplied.length !== 5)
@@ -1176,7 +1189,7 @@ export async function executeGeneral(
                   generalPage = cartPage;
                   tabWork.set(cartPage, "ready");
                   const cart = await read();
-                  await showWorkerProgress(cartPage, "Amazon cart verification", call.id);
+                  await capturePage(cartPage, "Amazon cart verification", call.id);
                   value = {
                     additions: addResults,
                     addedCount: addResults.filter((result) => result.added).length,
