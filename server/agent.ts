@@ -606,6 +606,30 @@ function amazonSearchURL(query: string) {
   return `https://www.amazon.com/s?k=${encodeURIComponent(query)}`;
 }
 
+function marketplaceSearchURL(query: string) {
+  return `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(query)}`;
+}
+
+async function marketplaceListingLinks(searchPage: Page) {
+  return searchPage
+    .locator('a[href*="/marketplace/item/"]')
+    .evaluateAll((anchors) => anchors.slice(0, 120).map((anchor) => {
+      const href = new URL((anchor as HTMLAnchorElement).href);
+      const match = href.pathname.match(/\/marketplace\/item\/(\d+)/);
+      const card = anchor.closest('[role="article"], [class*="x1n2onr6"]');
+      return {
+        id: match?.[1] || "",
+        url: match ? `https://www.facebook.com/marketplace/item/${match[1]}/` : "",
+        title: (
+          anchor.getAttribute("aria-label") ||
+          card?.textContent ||
+          anchor.textContent ||
+          "Marketplace listing"
+        ).trim().replace(/\s+/g, " ").slice(0, 260),
+      };
+    }).filter((listing) => listing.id && listing.url));
+}
+
 function amazonASIN(raw: string) {
   return raw.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i)?.[1]?.toUpperCase();
 }
@@ -806,6 +830,7 @@ export async function executeGeneral(
     spans.push({ ...span, start: performance.now() - start - span.duration });
   const visited = new Set<string>();
   const messages: ChatMessage[] = [...conversation, { role: "user", content: prompt }];
+  const providerLabel = configuration().provider === "fireworks" ? "Fireworks" : "Cerebras";
   const send = (type: string, data: Record<string, unknown> = {}) =>
     emit({ type, id, at: performance.now() - start, ...data });
   const runCoordinationCall = async (
@@ -1052,7 +1077,7 @@ export async function executeGeneral(
       try {
         await tab.bringToFront();
         generalPage = tab;
-        await showWorkerProgress(tab, `Cerebras clicking product ${workerIndex + 1}`, toolCallId);
+        await showWorkerProgress(tab, `${providerLabel} clicking product ${workerIndex + 1}`, toolCallId);
         const button = tab.locator(`[data-dash-node="${control.id}"]`);
         const response = tab.waitForResponse(
           (candidate) => candidate.request().method() === "POST" && /(?:cart|add-to-cart)/i.test(candidate.url()),
@@ -1066,7 +1091,7 @@ export async function executeGeneral(
           throw new Error("Amazon did not accept the native Add to Cart action.");
         await showWorkerProgress(tab, `Amazon cart worker ${workerIndex + 1}: added product`, toolCallId);
         send("action", {
-          label: `Cerebras added product ${workerIndex + 1}/${urls.length}`,
+          label: `${providerLabel} added product ${workerIndex + 1}/${urls.length}`,
           actions: ++actions,
           status: "done",
         });
@@ -1300,14 +1325,163 @@ export async function executeGeneral(
     });
 
     if (page.url() !== "about:blank" && configuration().demo === "marketplace") {
-      messages.push({
-        role: "user",
-        content: `Current browser page: ${JSON.stringify(await read())}`,
+      send("action", {
+        label: `Asking ${providerLabel} how to search Marketplace`,
+        actions: ++actions,
+        status: "done",
       });
-      await capture("Reading your current browser tab");
+      const searchPlan = await runCoordinationCall(
+        "Marketplace search planning inference",
+        "You are the search-planning stage of a fast Facebook Marketplace research agent. Infer the user's requested object and visual criteria. Call finish with only a JSON array of exactly four short, diverse Marketplace search queries likely to find distinct matching listings. Never include an address, commentary, Markdown, seller contact, offers, or purchase actions.",
+        prompt,
+        180,
+      );
+      let searchQueries: string[] = [];
+      try {
+        const parsed = JSON.parse(searchPlan || "[]");
+        if (Array.isArray(parsed))
+          searchQueries = parsed.filter((value): value is string => typeof value === "string");
+      } catch {
+        searchQueries = [...(searchPlan?.matchAll(/"([^"\n]{3,80})"/g) || [])].map((match) => match[1]);
+      }
+      searchQueries = [...new Set(searchQueries.map((query) => query.trim()).filter((query) => query.length >= 3 && query.length <= 80))].slice(0, 4);
+      if (searchQueries.length < 2) {
+        summary = `${providerLabel} did not return a usable Marketplace search plan, so no listings were inspected.`;
+      } else {
+        send("action", {
+          label: `Opening ${searchQueries.length} model-selected Marketplace searches in parallel`,
+          actions: ++actions,
+          status: "done",
+        });
+        const searchPages = await Promise.all(searchQueries.map(async (query, workerIndex) => {
+          const searchPage = await generalContext!.newPage();
+          registerTabs(searchPage);
+          disclosedTabs.add(searchPage);
+          searchPage.setDefaultTimeout(5000);
+          tabWork.set(searchPage, "loading");
+          try {
+            await showWorkerProgress(searchPage, `Marketplace search ${workerIndex + 1}: ${query}`, id);
+            await navigateWhenUsable(searchPage, marketplaceSearchURL(query), 15_000);
+            await searchPage.locator('a[href*="/marketplace/item/"]').first()
+              .waitFor({ state: "attached", timeout: 4500 }).catch(() => {});
+            tabWork.set(searchPage, "ready");
+            const listings = await marketplaceListingLinks(searchPage);
+            await showWorkerProgress(searchPage, `Marketplace search ${workerIndex + 1}: ${listings.length} links`, id);
+            return { query, page: searchPage, listings };
+          } catch (error) {
+            tabWork.set(searchPage, "error");
+            return {
+              query,
+              page: searchPage,
+              listings: [] as { id: string; url: string; title: string }[],
+              error: friendlyBrowserError(error instanceof Error ? error.message : "Marketplace search failed"),
+            };
+          }
+        }));
+        const candidates = new Map<string, { id: string; url: string; title: string; query: string }>();
+        for (let resultIndex = 0; resultIndex < 20 && candidates.size < 40; resultIndex++) {
+          for (const search of searchPages) {
+            const listing = search.listings[resultIndex];
+            if (!listing || candidates.has(listing.id)) continue;
+            candidates.set(listing.id, { ...listing, query: search.query });
+          }
+        }
+        const candidateList = [...candidates.values()];
+        const selection = await runCoordinationCall(
+          "Marketplace link-selection inference",
+          "You are the link-selection stage of a fast Facebook Marketplace research agent. From the supplied live search-result listings, rank ten distinct URLs most likely to satisfy the user's object and visual criteria. Call finish with only a JSON array of ten supplied canonical listing URLs, best first. Do not invent URLs, add commentary, contact sellers, make offers, or expose private details.",
+          JSON.stringify({ request: prompt, candidates: candidateList }),
+          360,
+        );
+        const selectedIDs = selection?.match(/\/marketplace\/item\/(\d+)/g)
+          ?.map((path) => path.match(/(\d+)/)?.[1] || "") || [];
+        const rankedURLs: string[] = [];
+        for (const listingId of [...new Set(selectedIDs)]) {
+          const candidate = candidates.get(listingId);
+          if (candidate) rankedURLs.push(candidate.url);
+        }
+        if (rankedURLs.length < 10)
+          for (const candidate of candidateList)
+            if (rankedURLs.length < 10 && !rankedURLs.includes(candidate.url)) rankedURLs.push(candidate.url);
+        send("action", {
+          label: `Opening ${Math.min(10, rankedURLs.length)} model-selected listing links in parallel`,
+          actions: ++actions,
+          status: "done",
+        });
+        const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
+        const inspected = await Promise.all(rankedURLs.slice(0, 10).map(async (url, workerIndex) => {
+          const requested = new URL(url);
+          let listingPage = existingTabs.find((candidate) => {
+            try {
+              const current = new URL(candidate.url());
+              return current.origin === requested.origin && current.pathname === requested.pathname;
+            } catch {
+              return false;
+            }
+          });
+          const reused = Boolean(listingPage);
+          listingPage ||= await generalContext!.newPage();
+          registerTabs(listingPage);
+          disclosedTabs.add(listingPage);
+          listingPage.setDefaultTimeout(5000);
+          tabWork.set(listingPage, reused ? "reading" : "loading");
+          try {
+            await showWorkerProgress(listingPage, `Listing worker ${workerIndex + 1}: opening`, id);
+            if (!reused) await navigateWhenUsable(listingPage, url, 15_000);
+            await listingPage.locator("body").waitFor({ state: "attached", timeout: 3500 });
+            tabWork.set(listingPage, "reading");
+            const workerCallNumber = ++modelCallsStarted;
+            send("inference-start", { call: workerCallNumber });
+            const verdict = await inspectMarketplaceListing(
+              listingPage,
+              signal,
+              (timing) => {
+                timings.push(timing);
+                recordSpan({ name: `Marketplace vision worker ${workerIndex + 1}`, category: "model", duration: timing.total });
+                send("inference", { call: workerCallNumber, timing });
+              },
+              async (label) => {
+                send("action", {
+                  label: `Listing worker ${workerIndex + 1}: ${label}`,
+                  actions: ++actions,
+                  status: "done",
+                });
+                await showWorkerProgress(listingPage!, `Listing worker ${workerIndex + 1}: ${label}`, id);
+              },
+            );
+            tabWork.set(listingPage, verdict.status === "blocked" ? "error" : "ready");
+            return verdict;
+          } catch (error) {
+            tabWork.set(listingPage, "error");
+            return {
+              status: "blocked" as const,
+              title: await listingPage.title().catch(() => "Unknown listing"),
+              price: "Unknown price",
+              location: "Unknown location",
+              url,
+              photoEvidence: "The first photo could not be inspected.",
+              shippingEvidence: "Shipping could not be verified.",
+              reason: friendlyBrowserError(error instanceof Error ? error.message : "Listing inspection failed"),
+            };
+          }
+        }));
+        const matches = inspected.filter((candidate) => candidate.status === "match").slice(0, 2);
+        const verifiedResult = matches.length
+          ? `Verified Marketplace matches: ${JSON.stringify(matches)}`
+          : `No qualifying listing was verified. Inspected results: ${JSON.stringify(inspected)}`;
+        const finalAnswer = await runCoordinationCall(
+          "Marketplace final-answer inference",
+          "You are the final response stage of a Facebook Marketplace research agent. Using only the supplied worker verdicts, return a concise numbered list of up to two verified matches. Each match must include its clickable canonical URL, title, price, location, first-photo open-beak evidence, and Sunnyvale-shipping evidence. If fewer than two match, state that limitation. Never invent facts, contact sellers, make offers, or expose private details.",
+          verifiedResult,
+          700,
+        );
+        summary = finalAnswer || (matches.length
+          ? matches.map((match, index) => `${index + 1}. [${match.title}](${match.url}) — ${match.price}. ${match.photoEvidence} ${match.shippingEvidence}`).join("\n")
+          : "No listing satisfied both the first-photo open-beak requirement and verified shipping requirement.");
+      }
     } else if (configuration().demo === "amazon") {
       send("action", {
-        label: "Asking Cerebras how to search Amazon",
+        label: `Asking ${providerLabel} how to search Amazon`,
         actions: ++actions,
         status: "done",
       });
@@ -1328,7 +1502,7 @@ export async function executeGeneral(
       }
       searchQueries = [...new Set(searchQueries.map((query) => query.trim()).filter((query) => query.length >= 3 && query.length <= 80))].slice(0, 4);
       if (searchQueries.length < 2) {
-        summary = "Cerebras did not return a usable Amazon search plan, so no cart changes were made.";
+        summary = `${providerLabel} did not return a usable Amazon search plan, so no cart changes were made.`;
       } else {
         send("action", {
           label: `Opening ${searchQueries.length} model-selected Amazon searches in parallel`,
@@ -1435,7 +1609,7 @@ export async function executeGeneral(
               content: `The live Amazon cart is already verified as exactly five selected products at quantity one. Shopping is complete. Continue from this current cart observation through the full authorized checkout; do not search, add, remove, or change products. Use only the matching saved destination and saved payment method, review the final order, place it, and wait through payment authorization until confirmed, failed, or explicit manual action is required. Current cart page: ${JSON.stringify(finalCart.cart)}`,
             });
             send("action", {
-              label: "Handing the verified cart to Cerebras for checkout",
+              label: `Handing the verified cart to ${providerLabel} for checkout`,
               actions: ++actions,
               status: "done",
             });
