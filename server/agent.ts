@@ -1095,52 +1095,72 @@ export async function executeGeneral(
     generalPage = cartPage;
     tabWork.set(cartPage, "ready");
     const expectedASINs = new Set(urls.map(amazonASIN).filter((asin): asin is string => Boolean(asin)));
-    const cartItems = cartPage.locator(
-      '.sc-list-item[data-asin]:not([data-asin=""]), [data-name="Active Items"] [data-asin]:not([data-asin=""])',
-    );
+    // Scope strictly to the active cart. The previous global .sc-list-item
+    // selector also counted Amazon's Saved for Later section as cart contents.
+    const activeCartSelector = [
+      '#sc-active-cart .sc-list-item[data-asin]:not([data-asin=""])',
+      'form#activeCartViewForm .sc-list-item[data-asin]:not([data-asin=""])',
+      '[data-name="Active Items"] .sc-list-item[data-asin]:not([data-asin=""])',
+      '[data-name="Active Items"] > [data-asin]:not([data-asin=""])',
+    ].join(", ");
     // Remove stale test items and normalize selected products to quantity one.
     // This is part of the already-authorized cart operation and prevents an old
     // persistent-profile cart from leaking into a real checkout.
-    const initialCartASINs = await cartItems.evaluateAll((items) => [
-      ...new Set(items.map((item) => (item.getAttribute("data-asin") || "").toUpperCase()).filter(Boolean)),
-    ]);
-    for (const asin of initialCartASINs) {
-      const item = cartPage.locator(
-        `.sc-list-item[data-asin="${asin}"], [data-name="Active Items"] [data-asin="${asin}"]`,
-      ).first();
-      if (!expectedASINs.has(asin)) {
-        const remove = item.locator(
-          'input[value="Delete"], input[data-action="delete"], button[aria-label*="Delete" i], button:has-text("Delete")',
+    for (let cleanupPass = 0; cleanupPass < 2; cleanupPass++) {
+      const cartItems = cartPage.locator(activeCartSelector);
+      await cartItems.first().waitFor({ state: "attached", timeout: 3000 }).catch(() => {});
+      const initialCartASINs = await cartItems.evaluateAll((items) => [
+        ...new Set(items.map((item) => (item.getAttribute("data-asin") || "").toUpperCase()).filter(Boolean)),
+      ]);
+      let mutated = false;
+      for (const asin of initialCartASINs) {
+        const item = cartPage.locator(
+          `#sc-active-cart [data-asin="${asin}"], form#activeCartViewForm [data-asin="${asin}"], [data-name="Active Items"] [data-asin="${asin}"]`,
         ).first();
-        if (await remove.isVisible().catch(() => false)) {
-          const mutation = cartPage.waitForResponse(
-            (response) => response.request().method() === "POST" && /cart/i.test(response.url()),
-            { timeout: 4000 },
-          ).catch(() => null);
-          await remove.click({ timeout: 4000, noWaitAfter: true });
-          await mutation;
+        if (!expectedASINs.has(asin)) {
+          const remove = item.locator(
+            'input[value="Delete"], input[data-action="delete"], button[aria-label*="Delete" i], button:has-text("Delete")',
+          ).first();
+          if (await remove.isVisible().catch(() => false)) {
+            const mutation = cartPage.waitForResponse(
+              (response) => response.request().method() === "POST" && /cart/i.test(response.url()),
+              { timeout: 4000 },
+            ).catch(() => null);
+            await remove.click({ timeout: 4000, noWaitAfter: true });
+            await mutation;
+            mutated = true;
+          }
+          continue;
         }
-        continue;
-      }
-      const quantity = item.locator('select[name^="quantity"], select[aria-label*="Quantity" i]').first();
-      if (await quantity.count()) {
-        const current = await quantity.inputValue().catch(() => "1");
-        if (current !== "1") {
-          await quantity.selectOption("1").catch(() => {});
-          await cartPage.waitForTimeout(250);
+        const quantity = item.locator('select[name^="quantity"], select[aria-label*="Quantity" i]').first();
+        if (await quantity.count()) {
+          const current = await quantity.inputValue().catch(() => "1");
+          if (current !== "1") {
+            const mutation = cartPage.waitForResponse(
+              (response) => response.request().method() === "POST" && /cart/i.test(response.url()),
+              { timeout: 4000 },
+            ).catch(() => null);
+            await quantity.selectOption("1").catch(() => {});
+            await mutation;
+            mutated = true;
+          }
         }
       }
+      if (!mutated) break;
+      // Reload server truth before verification. Amazon updates the cart DOM
+      // asynchronously and an immediate read can otherwise see deleted rows.
+      await navigateWhenUsable(cartPage, "https://www.amazon.com/gp/cart/view.html", 10_000);
     }
-    await cartPage.waitForTimeout(350);
-    const normalizedCart = await cartPage.locator(
-      '.sc-list-item[data-asin]:not([data-asin=""]), [data-name="Active Items"] [data-asin]:not([data-asin=""])',
-    ).evaluateAll((items) => {
+    const normalizedCart = await cartPage.locator(activeCartSelector).evaluateAll((items) => {
       const unique = new Map<string, string>();
       for (const item of items) {
         const asin = (item.getAttribute("data-asin") || "").toUpperCase();
         if (!asin || unique.has(asin)) continue;
         const select = item.querySelector('select[name^="quantity"], select[aria-label*="Quantity" i]') as HTMLSelectElement | null;
-        unique.set(asin, select?.value || "1");
+        const input = item.querySelector('input[name^="quantity"]') as HTMLInputElement | null;
+        const prompt = item.querySelector('.a-dropdown-prompt')?.textContent?.trim();
+        const quantity = select?.value || input?.value || item.getAttribute("data-quantity") || prompt || "1";
+        unique.set(asin, quantity.match(/\d+/)?.[0] || quantity);
       }
       return [...unique.entries()].map(([asin, quantity]) => ({ asin, quantity }));
     });
