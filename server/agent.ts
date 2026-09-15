@@ -60,6 +60,11 @@ export async function modelStep(
   onCall: (call: ToolCall) => void,
   signal: AbortSignal,
   finishOnly = false,
+  options: {
+    system?: string;
+    tools?: readonly unknown[];
+    maxCompletionTokens?: number;
+  } = {},
 ) {
   const config = configuration();
   if (config.mode === 'local')
@@ -86,10 +91,10 @@ export async function modelStep(
     },
     body: JSON.stringify({
       model: config.model,
-      messages: [{ role: 'system', content: browserSystem }, ...messages],
-      tools: finishOnly
+      messages: [{ role: 'system', content: options.system || browserSystem }, ...messages],
+      tools: options.tools || (finishOnly
         ? marketplaceBrowserTools.filter((tool) => tool.function.name === 'finish')
-        : marketplaceBrowserTools,
+        : marketplaceBrowserTools),
       tool_choice: "required",
       // Marketplace photo decisions need the screenshot produced after each action.
       parallel_tool_calls: false,
@@ -97,7 +102,7 @@ export async function modelStep(
       stream_options: { include_usage: true },
       reasoning_effort: "none",
       temperature: 0.1,
-      max_completion_tokens: 4000,
+      max_completion_tokens: options.maxCompletionTokens || 4000,
     }),
     signal,
   });
@@ -205,6 +210,203 @@ export async function modelStep(
       function: { name: c.name, arguments: c.raw },
     })),
     timing,
+  };
+}
+
+const candidateWorkerTools = [
+  {
+    type: "function",
+    function: {
+      name: "read_page",
+      description: "Read the current listing DOM and current gallery controls.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "click",
+      description: "Click a photo-gallery control from the latest observation. Messaging, offers, saves, and purchases are blocked.",
+      parameters: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "press",
+      description: "Press ArrowRight or Escape on an observed gallery control.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string" },
+          key: { type: "string", enum: ["ArrowRight", "Escape"] },
+        },
+        required: ["id", "key"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "scroll",
+      description: "Scroll down or up to find shipping and listing details.",
+      parameters: {
+        type: "object",
+        properties: { direction: { type: "string", enum: ["up", "down"] } },
+        required: ["direction"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "finish_candidate",
+      description: "Return the final evidence-backed verdict for this listing. Always call this after inspecting all available photos and shipping details, or when blocked.",
+      parameters: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["match", "no_match", "blocked"] },
+          title: { type: "string" },
+          price: { type: "string" },
+          location: { type: "string" },
+          url: { type: "string" },
+          photoEvidence: { type: "string" },
+          shippingEvidence: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["status", "title", "price", "location", "url", "photoEvidence", "shippingEvidence", "reason"],
+      },
+    },
+  },
+] as const;
+
+const candidateWorkerSystem = `You are one worker in a parallel Marketplace inspection pool. Inspect only the listing already open in your assigned tab. You receive a fresh screenshot on every turn and must use the page and image pixels to evaluate the requested listing criteria.
+
+Click through available product photos when the requested criteria require it. After each gallery action, use the next screenshot or photo counter to confirm the image changed. If Next is inert, try one alternate thumbnail or ArrowRight once, then stop looping. Verify requested listing and shipping criteria from visible evidence. Do not navigate away from this listing.
+
+This is strictly read-only. Never message/contact the seller, make an offer, save, buy, enter personal information, or operate authentication controls. If login, CAPTCHA, OTP, passkey, or another blocker prevents inspection, return blocked. Always end by calling finish_candidate with a concise structured verdict supported by visible evidence.`;
+
+type CandidateVerdict = {
+  status: "match" | "no_match" | "blocked";
+  title: string;
+  price: string;
+  location: string;
+  url: string;
+  photoEvidence: string;
+  shippingEvidence: string;
+  reason: string;
+};
+
+async function inspectMarketplaceListing(
+  candidatePage: Page,
+  signal: AbortSignal,
+  reportInference: (timing: AgentCallTiming) => void,
+  reportAction: (label: string) => void,
+): Promise<CandidateVerdict> {
+  const canonicalURL = candidatePage.url();
+  const messages: ChatMessage[] = [{
+    role: "user",
+    content: `Inspect this single listing completely and return a verdict. Current page: ${JSON.stringify(await candidatePage.evaluate(readPageScript))}`,
+  }];
+  for (let turn = 0; turn < 12; turn += 1) {
+    signal.throwIfAborted();
+    const screenshot = await candidatePage.screenshot({
+      type: "jpeg",
+      quality: 72,
+      animations: "disabled",
+      timeout: 5000,
+    });
+    const calls: ToolCall[] = [];
+    const step = await modelStep(
+      [
+        ...messages,
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Fresh screenshot for this listing worker. Base every visual claim on these pixels." },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${screenshot.toString("base64")}`, detail: "low" } },
+          ],
+        },
+      ],
+      (call) => calls.push(call),
+      signal,
+      false,
+      { system: candidateWorkerSystem, tools: candidateWorkerTools, maxCompletionTokens: 1800 },
+    );
+    reportInference(step.timing);
+    messages.push({ role: "assistant", content: null, tool_calls: step.calls });
+    for (const call of calls) {
+      const args = call.arguments;
+      let result: unknown;
+      try {
+        if (call.name === "finish_candidate") {
+          const status = String(args.status);
+          if (!["match", "no_match", "blocked"].includes(status))
+            throw new Error("Invalid candidate status.");
+          const verdict: CandidateVerdict = {
+            status: status as CandidateVerdict["status"],
+            title: String(args.title || "Unknown listing"),
+            price: String(args.price || "Unknown price"),
+            location: String(args.location || "Unknown location"),
+            url: String(args.url || candidatePage.url() || canonicalURL),
+            photoEvidence: String(args.photoEvidence || "No visual evidence recorded."),
+            shippingEvidence: String(args.shippingEvidence || "No shipping evidence recorded."),
+            reason: String(args.reason || "No reason recorded."),
+          };
+          reportAction(`Worker finished: ${verdict.title}`);
+          return verdict;
+        }
+        if (call.name === "read_page") {
+          result = await candidatePage.evaluate(readPageScript);
+        } else if (call.name === "scroll") {
+          const direction = String(args.direction);
+          if (!["up", "down"].includes(direction)) throw new Error("Choose up or down.");
+          await candidatePage.evaluate((value) => window.scrollBy({
+            top: (value === "up" ? -1 : 1) * innerHeight * 0.8,
+            behavior: "instant",
+          }), direction);
+          result = await candidatePage.evaluate(readPageScript);
+        } else if (["click", "press"].includes(call.name)) {
+          if (typeof args.id !== "string" || !/^[a-f0-9]{8}-\d{1,2}$/.test(args.id))
+            throw new Error("Use an element ID from the latest observation.");
+          const currentSnapshot = await candidatePage.evaluate(
+            () => document.documentElement.dataset.dashSnapshotId,
+          );
+          if (currentSnapshot !== args.id.split("-")[0])
+            throw new Error("The observation is stale. Read the page again.");
+          const locator = candidatePage.locator(`[data-dash-node="${args.id}"]`);
+          const label = (await locator.getAttribute("aria-label")) || (await locator.textContent()) || "";
+          if (consequentialLabel.test(label))
+            throw new Error("Messaging, offers, saves, and purchases are blocked.");
+          if (call.name === "click") await locator.click({ timeout: 4000 });
+          else {
+            if (!["ArrowRight", "Escape"].includes(String(args.key))) throw new Error("Unsupported key.");
+            await locator.press(String(args.key));
+          }
+          result = await candidatePage.evaluate(readPageScript);
+        } else {
+          throw new Error(`Unsupported worker action: ${call.name}`);
+        }
+        reportAction(`Worker ${call.name}`);
+      } catch (error) {
+        result = { error: error instanceof Error ? friendlyBrowserError(error.message) : "Worker action failed." };
+      }
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+    }
+  }
+  return {
+    status: "blocked",
+    title: await candidatePage.title().catch(() => "Unknown listing"),
+    price: "Unknown price",
+    location: "Unknown location",
+    url: candidatePage.url() || canonicalURL,
+    photoEvidence: "The worker did not complete gallery verification within 12 steps.",
+    shippingEvidence: "Shipping verification was incomplete.",
+    reason: "Worker step limit reached.",
   };
 }
 let generalContext: BrowserContext | undefined;
@@ -608,13 +810,24 @@ export async function executeGeneral(
                           timeout: 12000,
                         });
                       await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
-                      const text = await tab.locator("body").innerText({ timeout: 4000 });
-                      tabWork.set(tab, "ready");
+                      tabWork.set(tab, "reading");
+                      const verdict = await inspectMarketplaceListing(
+                        tab,
+                        signal,
+                        (timing) => {
+                          timings.push(timing);
+                          send("inference", { call: timings.length, timing });
+                        },
+                        (label) => send("action", {
+                          label,
+                          actions: ++actions,
+                          status: "done",
+                        }),
+                      );
+                      tabWork.set(tab, verdict.status === "blocked" ? "error" : "ready");
                       return {
-                        url: tab.url(),
-                        title: await tab.title(),
                         reused,
-                        preview: text.replace(/\n{3,}/g, "\n\n").slice(0, 2400),
+                        ...verdict,
                       };
                     } catch (error) {
                       tabWork.set(tab, "error");
@@ -626,10 +839,11 @@ export async function executeGeneral(
                     }
                   }));
                   value = {
-                    opened: loaded,
-                    next: "Call list_tabs, then switch_tab and visually inspect candidates one at a time. Call finish with the final answer after two matches or a blocker.",
+                    candidates: loaded,
+                    matchCount: loaded.filter((candidate) => "status" in candidate && candidate.status === "match").length,
+                    next: "The candidates were fully processed by parallel vision workers. Use their structured verdicts directly; do not inspect them again serially.",
                   };
-                  await capture(`Preloaded ${urls.length} listing tabs`, call.id);
+                  await capture(`Processed ${urls.length} listing tabs in parallel`, call.id);
                 } else if (call.name === "navigate") {
                   const url = safePublicURL(
                     String(args.url),
