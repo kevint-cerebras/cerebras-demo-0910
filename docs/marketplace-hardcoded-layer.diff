@@ -1,0 +1,42 @@
+diff --git a/server/agent.ts b/server/agent.ts
+--- a/server/agent.ts
++++ b/server/agent.ts
+@@ Marketplace candidate qualification
++const candidateWorkerSystem = `You are one worker in a parallel Facebook Marketplace inspection pool. Inspect only the listing already open in your assigned tab. For minimum latency, judge ONLY the supplied first listing screenshot; do not request or inspect additional gallery photos. Use image pixels—not titles, DOM text, alt text, or thumbnails—to decide whether the goose statue has a visibly open beak with a clear gap between upper and lower beak. Separately verify shipping from visible listing evidence. When the Marketplace buyer location is visibly Sunnyvale, California and the listing says "Ships for …", shows an estimated shipped arrival, or otherwise explicitly offers shipping, that confirms shipping to the active Sunnyvale destination even if the ZIP code is not repeated in the listing text. Pickup-only or genuinely unclear shipping is not a match. Do not navigate away from this listing.
++
++This is strictly read-only. Never message/contact the seller, make an offer, save, buy, enter personal information, or operate authentication controls. If login, CAPTCHA, OTP, passkey, or another blocker prevents inspection, return blocked. Always end by calling finish_candidate with concise structured evidence. A match requires BOTH pixel-visible open-beak proof and visible shipping proof applicable to the active Sunnyvale buyer location.`;
+
+@@ Marketplace search query
++const searchQueries = ["goose statue"];
+
+@@ Marketplace discovery limits
++for (let resultIndex = 0; resultIndex < 80 && candidates.size < 80; resultIndex++) {
++  // Read up to 80 distinct links returned by the live goose-statue search.
++}
+
+@@ Marketplace parallel batch and stop condition
++const inspected = await inspectBatch(inspectionURLs.slice(0, 10), 0);
++let matches = inspected.filter((candidate) => candidate.status === "match");
++for (let offset = 10; matches.length < 2 && offset < inspectionURLs.length; offset += 10) {
++  const retryURLs = inspectionURLs.slice(offset, offset + 10);
++  const retryVerdicts = await inspectBatch(retryURLs, offset);
++  inspected.push(...retryVerdicts);
++  matches = inspected.filter((candidate) => candidate.status === "match");
++}
++matches = matches.slice(0, 2);
+
+@@ Marketplace final-answer contract
++const finalAnswerSystem = `Using only the supplied worker verdicts, return a concise numbered list of up to two verified matches. Each match must include its clickable canonical URL, title, price, location, first-photo open-beak evidence, and Sunnyvale-shipping evidence. If fewer than two were verified, say only that this run verified fewer than two from its live candidate pool; never claim that no other qualifying listing exists on Marketplace. Never invent facts, contact sellers, make offers, or expose private details.`;
+
+diff --git a/shared/browser-tools.ts b/shared/browser-tools.ts
+--- a/shared/browser-tools.ts
++++ b/shared/browser-tools.ts
+@@ Fixed Marketplace browser-agent brief
++FIXED MARKETPLACE BRIEF
++- Search Facebook Marketplace using the single query "goose statue" and inspect the live listing links returned by that result page. Do not spend model calls inventing or ranking additional search queries.
++- A result qualifies only if visible listing details confirm shipping or delivery to Sunnyvale, CA 94085. Exclude pickup-only or shipping-unclear listings. Never enter an address or change the account location.
++- A result qualifies only if its FIRST full listing photo visibly shows the goose statue with its mouth or beak open: require a clear pixel-visible gap between the upper and lower beak. Titles, descriptions, accessibility text, and thumbnails are not visual proof. Do not inspect any additional photos.
++- SPEED: once the goose-statue search page exposes canonical listing links, call open_listing_tabs with the first ten. If the first batch returns fewer than two matches, send the next fresh batch of uninspected links from the same search result. Do not finalize a one-match result while uninspected result links remain.
++- STOP CONDITION: the instant TWO unique listings satisfy both the photo and Sunnyvale-shipping tests, stop browsing and call finish.
++- The final answer must be a short numbered list of up to two options containing a clickable Marketplace link, title, price, location, photo-specific visual evidence, and shipping evidence.
++- This is strictly read-only: never message or contact sellers, make offers, save listings, reveal contact information, change the account, add to cart, check out, or buy anything.
