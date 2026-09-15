@@ -58,7 +58,7 @@ try {
   );
   assert.equal(await page.getByTestId("aui-user-message").count(), 1);
   assert.equal(await page.getByTestId("aui-assistant-message").count(), 1);
-  assert.equal(await page.getByTestId("aui-browser-tool").count(), 1);
+  assert.equal(await page.getByTestId("aui-browser-tool").count(), 0);
   assert.equal(
     await page.getByLabel("Ask Dash to use the browser").inputValue(),
     "",

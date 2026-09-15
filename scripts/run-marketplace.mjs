@@ -46,7 +46,7 @@ const child = spawn(executable, ['server/index.ts'], {
   stdio: 'inherit',
 });
 
-// Open the Muse controller automatically; its browser pane is the visible
+// Open the Cerebras controller automatically; its browser pane is the visible
 // agent target in the default embedded presentation mode.
 const dashURL = `http://localhost:${environment.PORT || '3100'}`;
 if (process.platform === 'darwin' && process.env.OPEN_DASH_UI !== 'false') {
@@ -64,7 +64,7 @@ if (process.platform === 'darwin' && process.env.OPEN_DASH_UI !== 'false') {
           stdio: 'ignore',
         });
         opener.unref();
-        console.log(`Muse opened at ${dashURL} with the ${browserView} browser view`);
+        console.log(`Cerebras opened at ${dashURL} with the ${browserView} browser view`);
         break;
       }
     } catch {

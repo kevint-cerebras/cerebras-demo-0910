@@ -246,7 +246,7 @@ app.use(
   },
 );
 const server = app.listen(port, hostname, () => {
-  console.log(`Muse is running at http://localhost:${port}`);
+  console.log(`Cerebras is running at http://localhost:${port}`);
   void warmGeneral().catch((error) =>
     console.error("Browser warmup:", error.message),
   );

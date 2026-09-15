@@ -3,8 +3,6 @@ import {
   ArrowUp,
   ArrowRight,
   Check,
-  Code2,
-  Menu,
   Mic,
   Plus,
   Square,
@@ -20,7 +18,7 @@ import { InteractivePreview } from "./InteractivePreview";
 import { useDash } from "./useDash";
 import { useVoice } from "./useVoice";
 import { DashMessages, DashToolContext } from "./AssistantThread";
-import { BrowserView, MuseAvatar, TimingPanel } from "./components";
+import { BrowserView, CerebrasAvatar } from "./components";
 import ApprovalModal from "./ApprovalModal";
 import { getStore, money } from "../shared/catalog";
 
@@ -51,7 +49,6 @@ export default function App() {
   const [pastMessages, setPastMessages] = useState<ThreadMessageLike[]>([]);
   const archivedTools = useRef(new Map<string, ReactNode>());
   useEffect(() => { if (followUpOpen) followUpInput.current?.focus(); }, [followUpOpen]);
-  const [details, setDetails] = useState(false);
   const [review, setReview] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -64,12 +61,10 @@ export default function App() {
   const winner = result?.winner;
   const messageId = `${task.current}-assistant`;
   const toolId = `${task.current}-cart`;
-  const elapsed = result ? result.metrics.total : dash.elapsed;
   const submit = (text: string, continuation = false) => {
     if (submitting.current || dash.running || dash.resetting || text.trim().length < 3) return;
     voice.finish();
     if (continuation && result) {
-      archivedTools.current.set(toolId, toolContent);
       archivedTools.current.set(`${toolId}-approval`, approvalContent);
       setPastMessages(messages);
     }
@@ -187,61 +182,6 @@ export default function App() {
       setApproving(false);
     }
   };
-  const toolContent = (
-    <>
-      {dash.browserMode && dash.browserActions.length > 0 && (
-        <div className="browser-activity" aria-label="Browser activity">
-          {dash.browserActions.map((action, index) => (
-            <div key={index}>
-              <span>{action.status === "error" ? "!" : "✓"}</span>{" "}
-              {action.label}
-              {action.error && <span className="inline-error"> — {action.error}</span>}
-            </div>
-          ))}
-        </div>
-      )}
-      {dash.meta && (
-        <div className="preferences">
-          {dash.meta.diets.map((diet) => (
-            <span key={diet}>{diet}</span>
-          ))}
-          <span>For {dash.meta.people}</span>
-          {dash.meta.budget !== null && <span>Under ${dash.meta.budget}</span>}
-        </div>
-      )}
-      {dash.quotes.length > 0 && (
-        <div className="demo-comparison">
-          <h3>
-            Price comparison <small>including delivery</small>
-          </h3>
-          {dash.quotes.map((quote) => (
-            <div
-              key={quote.store}
-              className={winner?.store === quote.store ? "selected" : ""}
-            >
-              <span>{getStore(quote.store).shortName}</span>
-              <strong>
-                {quote.complete ? money(quote.total) : "Incomplete"}
-              </strong>
-            </div>
-          ))}
-        </div>
-      )}
-      {dash.error && (
-        <p className="inline-error" role="alert">
-          {dash.error}
-        </p>
-      )}
-      {result?.status === "blocked" && (
-        <div className="inline-error" role="alert">
-          {result.warnings.map((w) => (
-            <p key={w}>{w.replace("UNSUPPORTED:", "")}</p>
-          ))}
-        </div>
-      )}
-
-    </>
-  );
   const approvalContent = <>
       {winner && (
         <div className="demo-cart">
@@ -297,57 +237,18 @@ export default function App() {
     <AssistantRuntimeProvider runtime={runtime}>
       <DashToolContext.Provider
         value={{
-          content: toolContent,
           approvalContent,
           archivedTools: archivedTools.current,
-          busy: dash.running,
-          label: dash.running
-            ? "Working in the browser"
-            : dash.error || result?.status === "blocked"
-              ? "Needs attention"
-              : ["ordered", "done"].includes(result?.status || "")
-                ? "Done"
-                : "Ready for your approval",
         }}
       >
-        <div className="demo-app muse-skin" data-assistant-ui="external-store-runtime">
+        <div className="demo-app cerebras-skin" data-assistant-ui="external-store-runtime">
           <header className="demo-header">
-            <button
-              type="button"
-              className="demo-menu"
-              aria-label="Open controls"
-              onClick={() => setDetails(true)}
-            >
-              <Menu size={19} />
-            </button>
+            <span className="demo-header-spacer" aria-hidden="true" />
             <div className="demo-brand">
-              <MuseAvatar />
-              <strong>Muse</strong>
+              <CerebrasAvatar />
+              <strong>Cerebras</strong>
             </div>
             <div className="demo-header-state">
-                <button
-                  className="demo-stats"
-                  aria-label="Development timing overlay"
-                  onClick={() => setDetails(!details)}
-                >
-                  <span>
-                    <b>{dash.metrics.actions}</b> browser actions
-                  </span>
-                  <span>
-                    <b>{dash.metrics.modelCalls}</b> model{" "}
-                    {dash.metrics.modelCalls === 1 ? "call" : "calls"}
-                  </span>
-                  <span>
-                    <b>
-                      {dash.metrics.pages ||
-                        (!dash.browserMode && dash.health?.browser.warm
-                          ? 3
-                          : 0)}
-                    </b>{" "}
-                    pages
-                  </span>
-                  <Code2 size={15} />
-                </button>
               <span
                 className="demo-provider"
                 role="status"
@@ -432,7 +333,7 @@ export default function App() {
               </main>
               <aside className="demo-assistant">
                 <div className="demo-panel-title">
-                  <span><MuseAvatar /><b>Muse</b></span>
+                  <span><CerebrasAvatar /><b>Cerebras</b></span>
                   <small>
                     <i />
                     {dash.running
@@ -457,8 +358,8 @@ export default function App() {
                     <DashMessages />
                   ) : (
                     <div className="demo-intro">
-                      <MuseAvatar large />
-                      <h2>What can Muse do for you?</h2>
+                      <CerebrasAvatar large />
+                      <h2>What can Cerebras do for you?</h2>
                       <p>
                         {isAmazon
                           ? "Ask me to browse Amazon, compare products, and take care of your shopping."
@@ -494,8 +395,8 @@ export default function App() {
                     </button>
                     <ComposerPrimitive.Input
                       ref={composerInput}
-                      aria-label={isAmazon ? "Ask Muse to use Amazon" : "Ask Muse to use Marketplace"}
-                      placeholder="Message Muse"
+                      aria-label={isAmazon ? "Ask Cerebras to use Amazon" : "Ask Cerebras to use Marketplace"}
+                      placeholder="Message Cerebras"
                       onChange={(e) => {
                         const text = e.target.value;
                         queueMicrotask(() => setInput(text));
@@ -507,7 +408,7 @@ export default function App() {
                     />
                     {dash.running ? (
                       <ComposerPrimitive.Cancel asChild>
-                        <button className="demo-submit" aria-label="Stop Muse">
+                        <button className="demo-submit" aria-label="Stop Cerebras">
                           <Square size={13} />
                         </button>
                       </ComposerPrimitive.Cancel>
@@ -547,17 +448,6 @@ export default function App() {
               </aside>
             </div>
           </ThreadPrimitive.Root>
-          {details && (
-            <TimingPanel
-              metrics={dash.metrics}
-              runId={dash.runId}
-              running={dash.running}
-              elapsed={elapsed}
-              mode={dash.health?.mode || "local"}
-              clientTiming={dash.clientTiming}
-              onClose={() => setDetails(false)}
-            />
-          )}
           {review && result?.winner && (
             <ApprovalModal
               result={result}

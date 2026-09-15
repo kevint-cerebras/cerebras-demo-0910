@@ -30,16 +30,16 @@ import type {
   StoreId,
 } from "../shared/types";
 import type { ActionLog, StageState } from "./useDash";
-import museOfficialLogo from "./assets/muse-logo-official.png";
+import cerebrasLogo from "./assets/cerebras-c-logo.svg";
 
-export function MuseAvatar({ large = false }: { large?: boolean }) {
+export function CerebrasAvatar({ large = false }: { large?: boolean }) {
   return (
     <span
-      className={`muse-avatar${large ? " muse-avatar-large" : ""}`}
+      className={`cerebras-avatar${large ? " cerebras-avatar-large" : ""}`}
       role="img"
-      aria-label="Muse"
+      aria-label="Cerebras"
     >
-      <img src={museOfficialLogo} alt="" aria-hidden="true" />
+      <img src={cerebrasLogo} alt="" aria-hidden="true" />
     </span>
   );
 }
@@ -203,7 +203,7 @@ export function BrowserView({
             <p>
               {running
                 ? "Working in the browser."
-                : "Watch Muse navigate and take action here."}
+                : "Watch Cerebras navigate and take action here."}
             </p>
             <div className="placeholder-stores">
               {stores.map((s) => (

@@ -354,9 +354,9 @@ const candidateWorkerTools = [
   },
 ] as const;
 
-const candidateWorkerSystem = `You are one worker in a parallel Facebook Marketplace inspection pool. Inspect only the listing already open in your assigned tab. For minimum latency, judge ONLY the supplied first listing screenshot; do not request or inspect additional gallery photos. Use image pixels—not titles, DOM text, alt text, or thumbnails—to decide whether the goose statue has a visibly open beak with a clear gap between upper and lower beak. Separately verify visible listing text says the item can ship or be delivered to Sunnyvale, CA 94085; pickup-only or unclear shipping is not a match. Do not navigate away from this listing.
+const candidateWorkerSystem = `You are one worker in a parallel Facebook Marketplace inspection pool. Inspect only the listing already open in your assigned tab. For minimum latency, judge ONLY the supplied first listing screenshot; do not request or inspect additional gallery photos. Use image pixels—not titles, DOM text, alt text, or thumbnails—to decide whether the goose statue has a visibly open beak with a clear gap between upper and lower beak. Separately verify shipping from visible listing evidence. When the Marketplace buyer location is visibly Sunnyvale, California and the listing says "Ships for …", shows an estimated shipped arrival, or otherwise explicitly offers shipping, that confirms shipping to the active Sunnyvale destination even if the ZIP code is not repeated in the listing text. Pickup-only or genuinely unclear shipping is not a match. Do not navigate away from this listing.
 
-This is strictly read-only. Never message/contact the seller, make an offer, save, buy, enter personal information, or operate authentication controls. If login, CAPTCHA, OTP, passkey, or another blocker prevents inspection, return blocked. Always end by calling finish_candidate with concise structured evidence. A match requires BOTH pixel-visible open-beak proof and explicit Sunnyvale shipping proof.`;
+This is strictly read-only. Never message/contact the seller, make an offer, save, buy, enter personal information, or operate authentication controls. If login, CAPTCHA, OTP, passkey, or another blocker prevents inspection, return blocked. Always end by calling finish_candidate with concise structured evidence. A match requires BOTH pixel-visible open-beak proof and visible shipping proof applicable to the active Sunnyvale buyer location.`;
 
 type CandidateVerdict = {
   status: "match" | "no_match" | "blocked";
@@ -1325,31 +1325,10 @@ export async function executeGeneral(
     });
 
     if (page.url() !== "about:blank" && configuration().demo === "marketplace") {
-      send("action", {
-        label: `Asking ${providerLabel} how to search Marketplace`,
-        actions: ++actions,
-        status: "done",
-      });
-      const searchPlan = await runCoordinationCall(
-        "Marketplace search planning inference",
-        "You are the search-planning stage of a fast Facebook Marketplace research agent. Infer the user's requested object and visual criteria. Call finish with only a JSON array of exactly four short, diverse Marketplace search queries likely to find distinct matching listings. Never include an address, commentary, Markdown, seller contact, offers, or purchase actions.",
-        prompt,
-        180,
-      );
-      let searchQueries: string[] = [];
-      try {
-        const parsed = JSON.parse(searchPlan || "[]");
-        if (Array.isArray(parsed))
-          searchQueries = parsed.filter((value): value is string => typeof value === "string");
-      } catch {
-        searchQueries = [...(searchPlan?.matchAll(/"([^"\n]{3,80})"/g) || [])].map((match) => match[1]);
-      }
-      searchQueries = [...new Set(searchQueries.map((query) => query.trim()).filter((query) => query.length >= 3 && query.length <= 80))].slice(0, 4);
-      if (searchQueries.length < 2) {
-        summary = `${providerLabel} did not return a usable Marketplace search plan, so no listings were inspected.`;
-      } else {
+      const searchQueries = ["goose statue"];
+      {
         send("action", {
-          label: `Opening ${searchQueries.length} model-selected Marketplace searches in parallel`,
+          label: "Opening Facebook Marketplace search for goose statues",
           actions: ++actions,
           status: "done",
         });
@@ -1379,7 +1358,7 @@ export async function executeGeneral(
           }
         }));
         const candidates = new Map<string, { id: string; url: string; title: string; query: string }>();
-        for (let resultIndex = 0; resultIndex < 20 && candidates.size < 40; resultIndex++) {
+        for (let resultIndex = 0; resultIndex < 80 && candidates.size < 80; resultIndex++) {
           for (const search of searchPages) {
             const listing = search.listings[resultIndex];
             if (!listing || candidates.has(listing.id)) continue;
@@ -1387,29 +1366,15 @@ export async function executeGeneral(
           }
         }
         const candidateList = [...candidates.values()];
-        const selection = await runCoordinationCall(
-          "Marketplace link-selection inference",
-          "You are the link-selection stage of a fast Facebook Marketplace research agent. From the supplied live search-result listings, rank ten distinct URLs most likely to satisfy the user's object and visual criteria. Call finish with only a JSON array of ten supplied canonical listing URLs, best first. Do not invent URLs, add commentary, contact sellers, make offers, or expose private details.",
-          JSON.stringify({ request: prompt, candidates: candidateList }),
-          360,
-        );
-        const selectedIDs = selection?.match(/\/marketplace\/item\/(\d+)/g)
-          ?.map((path) => path.match(/(\d+)/)?.[1] || "") || [];
-        const rankedURLs: string[] = [];
-        for (const listingId of [...new Set(selectedIDs)]) {
-          const candidate = candidates.get(listingId);
-          if (candidate) rankedURLs.push(candidate.url);
-        }
-        if (rankedURLs.length < 10)
-          for (const candidate of candidateList)
-            if (rankedURLs.length < 10 && !rankedURLs.includes(candidate.url)) rankedURLs.push(candidate.url);
+        const inspectionURLs = candidateList.map((candidate) => candidate.url);
         send("action", {
-          label: `Opening ${Math.min(10, rankedURLs.length)} model-selected listing links in parallel`,
+          label: `Opening ${Math.min(10, inspectionURLs.length)} goose-statue listing links in parallel`,
           actions: ++actions,
           status: "done",
         });
         const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
-        const inspected = await Promise.all(rankedURLs.slice(0, 10).map(async (url, workerIndex) => {
+        const inspectBatch = async (urls: string[], workerOffset: number) => Promise.all(urls.map(async (url, batchIndex) => {
+          const workerIndex = workerOffset + batchIndex;
           const requested = new URL(url);
           let listingPage = existingTabs.find((candidate) => {
             try {
@@ -1465,13 +1430,26 @@ export async function executeGeneral(
             };
           }
         }));
-        const matches = inspected.filter((candidate) => candidate.status === "match").slice(0, 2);
+        const inspected = await inspectBatch(inspectionURLs.slice(0, 10), 0);
+        let matches = inspected.filter((candidate) => candidate.status === "match");
+        for (let offset = 10; matches.length < 2 && offset < inspectionURLs.length; offset += 10) {
+          const retryURLs = inspectionURLs.slice(offset, offset + 10);
+          send("action", {
+            label: `${matches.length} verified matches; checking ${retryURLs.length} more listings in parallel`,
+            actions: ++actions,
+            status: "done",
+          });
+          const retryVerdicts = await inspectBatch(retryURLs, offset);
+          inspected.push(...retryVerdicts);
+          matches = inspected.filter((candidate) => candidate.status === "match");
+        }
+        matches = matches.slice(0, 2);
         const verifiedResult = matches.length
-          ? `Verified Marketplace matches: ${JSON.stringify(matches)}`
-          : `No qualifying listing was verified. Inspected results: ${JSON.stringify(inspected)}`;
+          ? `Verified Marketplace matches after inspecting ${inspected.length} of ${inspectionURLs.length} distinct live candidate listings: ${JSON.stringify(matches)}`
+          : `No qualifying listing was verified after exhausting all ${inspectionURLs.length} distinct live candidate listings. Inspected results: ${JSON.stringify(inspected)}`;
         const finalAnswer = await runCoordinationCall(
           "Marketplace final-answer inference",
-          "You are the final response stage of a Facebook Marketplace research agent. Using only the supplied worker verdicts, return a concise numbered list of up to two verified matches. Each match must include its clickable canonical URL, title, price, location, first-photo open-beak evidence, and Sunnyvale-shipping evidence. If fewer than two match, state that limitation. Never invent facts, contact sellers, make offers, or expose private details.",
+          "You are the final response stage of a Facebook Marketplace research agent. Using only the supplied worker verdicts, return a concise numbered list of up to two verified matches. Each match must include its clickable canonical URL, title, price, location, first-photo open-beak evidence, and Sunnyvale-shipping evidence. If fewer than two were verified, say only that this run verified fewer than two from its live candidate pool; never claim that no other qualifying listing exists on Marketplace. Never invent facts, contact sellers, make offers, or expose private details.",
           verifiedResult,
           700,
         );

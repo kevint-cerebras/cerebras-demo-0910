@@ -5,16 +5,11 @@ import {
   type ToolCallMessagePartProps,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
-import { LoaderCircle } from "lucide-react";
-import { MuseAvatar } from "./components";
 
 export const DashToolContext = createContext<{
-  content: ReactNode;
   approvalContent: ReactNode;
   archivedTools: Map<string, ReactNode>;
-  busy: boolean;
-  label: string;
-}>({ content: null, approvalContent: null, archivedTools: new Map(), busy: false, label: "" });
+}>({ approvalContent: null, archivedTools: new Map() });
 function UserMessage() {
   return (
     <MessagePrimitive.Root
@@ -31,9 +26,12 @@ function UserMessage() {
 function ToolCard(props: ToolCallMessagePartProps) {
   const context = useContext(DashToolContext);
   const review = props.toolName === "review_and_confirm";
+  if (!review) return null;
   return (
-    <div className={review ? "aui-approval-tool" : "aui-browser-tool"} data-testid={review ? "aui-approval-tool" : "aui-browser-tool"}>
-      {context.archivedTools.has(props.toolCallId) ? context.archivedTools.get(props.toolCallId) : review ? context.approvalContent : context.content}
+    <div className="aui-approval-tool" data-testid="aui-approval-tool">
+      {context.archivedTools.has(props.toolCallId)
+        ? context.archivedTools.get(props.toolCallId)
+        : context.approvalContent}
     </div>
   );
 }
@@ -41,14 +39,8 @@ function Markdown() {
   return <MarkdownTextPrimitive className="answer-text" />;
 }
 function AssistantMessage() {
-  const { busy, label } = useContext(DashToolContext);
   return (
     <MessagePrimitive.Root data-testid="aui-assistant-message">
-      <div className="assistant-response-label">
-        <MuseAvatar />
-        <span>{label}</span>
-        {busy && <LoaderCircle size={12} className="spin" />}
-      </div>
       <MessagePrimitive.Parts
         components={{ Text: Markdown, tools: { Override: ToolCard } }}
       />
