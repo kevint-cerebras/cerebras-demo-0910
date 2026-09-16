@@ -504,7 +504,7 @@ html, body, #root { height: 100%; overflow: hidden; }
   max-width: none;
 }
 
-/* Cerebras-branded demo shell shared by the Amazon and Marketplace modes. */
+/* Cerebras-branded demo shell shared by the Amazon and OpenTable modes. */
 body:has(.demo-app.cerebras-skin) {
   background:
     radial-gradient(circle at 50% -20%, #fffdfb 0, #fff0e8 42%, #f6cbb7 100%);

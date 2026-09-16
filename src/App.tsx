@@ -363,14 +363,14 @@ export default function App() {
                       <p>
                         {isAmazon
                           ? "Ask me to browse Amazon, compare products, and take care of your shopping."
-                          : "Ask me to research Marketplace listings, compare the options, and return the best matches."}
+                          : "Ask me to find and book an OpenTable reservation for tonight."}
                       </p>
                       <p className="demo-fine">
                         {isAmazon
                           ? dash.health?.purchaseAuthorized
                             ? "This local session is authorized to submit the verified order using matching saved checkout details."
                             : "Cart preparation is allowed, but checkout and ordering are blocked. You can take over while the agent is idle."
-                          : "Research is read-only. You can take over the persistent Facebook browser whenever the agent is idle."}
+                          : "I reject card, deposit, package, and prepaid reservations. You can take over the persistent OpenTable browser whenever the agent is idle."}
                       </p>
                     </div>
                   )}
@@ -395,7 +395,7 @@ export default function App() {
                     </button>
                     <ComposerPrimitive.Input
                       ref={composerInput}
-                      aria-label={isAmazon ? "Ask Cerebras to use Amazon" : "Ask Cerebras to use Marketplace"}
+                      aria-label={isAmazon ? "Ask Cerebras to use Amazon" : "Ask Cerebras to use OpenTable"}
                       placeholder="Message Cerebras"
                       onChange={(e) => {
                         const text = e.target.value;

@@ -64,7 +64,9 @@ test("full slots are never selected and incomplete quotes never win", () => {
 });
 import {
   authorizedAmazonPurchaseAction,
+  browserSystem,
   classifyAmazonOrderState,
+  marketplaceBrowserTools,
   readPageScript,
   safePublicURL,
 } from "../shared/browser-tools";
@@ -77,6 +79,17 @@ test("browser helper scripts are valid JavaScript and private destinations are b
   assert.equal(
     safePublicURL("https://en.wikipedia.org/wiki/Porto"),
     "https://en.wikipedia.org/wiki/Porto",
+  );
+});
+
+test("the research-mode harness is configured for the OpenTable date-night task", () => {
+  assert.match(browserSystem, /OpenTable reservation agent/);
+  assert.match(browserSystem, /Hayes Valley/);
+  assert.match(browserSystem, /5:30 PM through 6:30 PM/);
+  assert.match(browserSystem, /Reject any reservation that requires a credit card, deposit, prepayment/);
+  assert.doesNotMatch(browserSystem, /Facebook|goose statue/i);
+  assert(
+    marketplaceBrowserTools.some((tool) => tool.function.name === "open_listing_tabs"),
   );
 });
 

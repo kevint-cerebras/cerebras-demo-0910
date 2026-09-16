@@ -382,10 +382,10 @@ export function useDash() {
     try {
       const response = await fetch("/api/browser/reset", { method: "POST" });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not return to Marketplace.");
+      if (!response.ok) throw new Error(data.error || "Could not return to OpenTable.");
       setBrowserPage(data.page);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Could not return to Marketplace.");
+      setError(error instanceof Error ? error.message : "Could not return to OpenTable.");
     } finally {
       setResetting(false);
     }

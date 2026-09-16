@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server/index.ts",
+    "opentable:cerebras": "node scripts/run-marketplace.mjs cerebras opentable",
+    "opentable:fireworks": "node scripts/run-marketplace.mjs fireworks opentable",
     "marketplace:cerebras": "node scripts/run-marketplace.mjs cerebras",
     "marketplace:fireworks": "node scripts/run-marketplace.mjs fireworks",
     "amazon:cerebras": "node scripts/run-marketplace.mjs cerebras amazon",

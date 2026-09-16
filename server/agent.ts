@@ -166,7 +166,7 @@ export async function modelStep(
         ? defaultTools.filter((tool) => tool.function.name === 'finish')
         : defaultTools),
       tool_choice: "required",
-      // Marketplace photo decisions need the screenshot produced after each action.
+      // OpenTable vibe and restaurant decisions need the screenshot produced after each action.
       parallel_tool_calls: false,
       stream: true,
       stream_options: { include_usage: true },
@@ -287,89 +287,52 @@ const candidateWorkerTools = [
   {
     type: "function",
     function: {
-      name: "read_page",
-      description: "Read the current listing DOM and current gallery controls.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "click",
-      description: "Click a photo-gallery control from the latest observation. Messaging, offers, saves, and purchases are blocked.",
-      parameters: {
-        type: "object",
-        properties: { id: { type: "string" } },
-        required: ["id"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "press",
-      description: "Press ArrowRight or Escape on an observed gallery control.",
-      parameters: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          key: { type: "string", enum: ["ArrowRight", "Escape"] },
-        },
-        required: ["id", "key"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "scroll",
-      description: "Scroll down or up to find shipping and listing details.",
-      parameters: {
-        type: "object",
-        properties: { direction: { type: "string", enum: ["up", "down"] } },
-        required: ["direction"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
       name: "finish_candidate",
-      description: "Return the final evidence-backed verdict for this listing after inspecting its first photo and shipping details, or when blocked.",
+      description: "Return the final evidence-backed verdict for the OpenTable restaurant already open in this worker tab.",
       parameters: {
         type: "object",
         properties: {
           status: { type: "string", enum: ["match", "no_match", "blocked"] },
           title: { type: "string" },
           price: { type: "string" },
-          location: { type: "string" },
+          cuisine: { type: "string" },
+          neighborhood: { type: "string" },
+          rating: { type: "number" },
+          availableTime: { type: "string" },
           url: { type: "string" },
-          photoEvidence: { type: "string" },
-          shippingEvidence: { type: "string" },
+          vibeEvidence: { type: "string" },
+          availabilityEvidence: { type: "string" },
+          paymentRequirement: { type: "string" },
           reason: { type: "string" },
         },
-        required: ["status", "title", "price", "location", "url", "photoEvidence", "shippingEvidence", "reason"],
+        required: ["status", "title", "price", "cuisine", "neighborhood", "rating", "availableTime", "url", "vibeEvidence", "availabilityEvidence", "paymentRequirement", "reason"],
       },
     },
   },
 ] as const;
 
-const candidateWorkerSystem = `You are one worker in a parallel Facebook Marketplace inspection pool. Inspect only the listing already open in your assigned tab. For minimum latency, judge ONLY the supplied first listing screenshot; do not request or inspect additional gallery photos. Use image pixels—not titles, DOM text, alt text, or thumbnails—to decide whether the goose statue has a visibly open beak with a clear gap between upper and lower beak. Separately verify shipping from visible listing evidence. When the Marketplace buyer location is visibly Sunnyvale, California and the listing says "Ships for …", shows an estimated shipped arrival, or otherwise explicitly offers shipping, that confirms shipping to the active Sunnyvale destination even if the ZIP code is not repeated in the listing text. Pickup-only or genuinely unclear shipping is not a match. Do not navigate away from this listing.
+const candidateWorkerSystem = `You are one worker in a parallel OpenTable restaurant inspection pool. Inspect only the restaurant page already open in your assigned tab. Use the supplied live DOM observation and screenshot; do not navigate or click. The request is for dinner tonight for two people at 6:00 PM at a cute, romantic Italian restaurant in Hayes Valley, San Francisco, around $30–$50 per person, with no credit card, deposit, package, or prepayment requirement.
 
-This is strictly read-only. Never message/contact the seller, make an offer, save, buy, enter personal information, or operate authentication controls. If login, CAPTCHA, OTP, passkey, or another blocker prevents inspection, return blocked. Always end by calling finish_candidate with concise structured evidence. A match requires BOTH pixel-visible open-beak proof and visible shipping proof applicable to the active Sunnyvale buyer location.`;
+Mark a restaurant as a match only when the live page supports Italian cuisine, the Hayes Valley/Civic Center-Hayes Valley-Van Ness area, a suitable price tier, a strong date-night vibe, and a visible reservation time between 5:30 PM and 6:30 PM. Prefer 6:00 PM, then the closest time. A payment requirement is disqualifying only when the reservation flow visibly says a card, deposit, prepaid experience, or paid package is required; ordinary restaurant payment-options text is not a booking requirement. If the restaurant page does not expose the final booking policy yet, use paymentRequirement="not shown on restaurant page" so the booking stage can verify it before submission.
+
+This worker is read-only. Never reserve, sign in, enter personal information, or operate authentication controls. Always end by calling finish_candidate with concise structured evidence from this live page. Do not invent availability, ratings, prices, neighborhood, or booking terms.`;
 
 type CandidateVerdict = {
   status: "match" | "no_match" | "blocked";
   title: string;
   price: string;
-  location: string;
+  cuisine: string;
+  neighborhood: string;
+  rating: number;
+  availableTime: string;
   url: string;
-  photoEvidence: string;
-  shippingEvidence: string;
+  vibeEvidence: string;
+  availabilityEvidence: string;
+  paymentRequirement: string;
   reason: string;
 };
 
-async function inspectMarketplaceListing(
+async function inspectOpenTableRestaurant(
   candidatePage: Page,
   signal: AbortSignal,
   reportInference: (timing: AgentCallTiming) => void,
@@ -379,14 +342,14 @@ async function inspectMarketplaceListing(
   const observations: unknown[] = [await candidatePage.evaluate(readPageScript)];
   signal.throwIfAborted();
   const firstPhoto = await screenshotWhenStable(candidatePage, 64);
-  await reportAction("captured first listing photo");
+  await reportAction("captured restaurant and availability");
 
   const evidence: (
     | { type: "text"; text: string }
     | { type: "image_url"; image_url: { url: string; detail: "low" } }
   )[] = [{
     type: "text",
-    text: `Return the final verdict for this listing using only its first photo. Listing URL: ${canonicalURL}\nDOM observation: ${JSON.stringify(observations).slice(0, 14000)}`,
+    text: `Return the final verdict for this restaurant for dinner tonight, party of two, target time 6:00 PM with a ±30 minute fallback. Restaurant URL: ${canonicalURL}\nLive DOM observation: ${JSON.stringify(observations).slice(0, 18000)}`,
   }];
   evidence.push({
     type: "image_url",
@@ -400,7 +363,7 @@ async function inspectMarketplaceListing(
     false,
     {
       system: candidateWorkerSystem,
-      tools: candidateWorkerTools.filter((tool) => tool.function.name === "finish_candidate"),
+      tools: candidateWorkerTools,
       maxCompletionTokens: 1200,
     },
   );
@@ -413,12 +376,16 @@ async function inspectMarketplaceListing(
     throw new Error("Invalid candidate status.");
   const verdict: CandidateVerdict = {
     status: status as CandidateVerdict["status"],
-    title: String(args.title || await candidatePage.title().catch(() => "Unknown listing")),
+    title: String(args.title || await candidatePage.title().catch(() => "Unknown restaurant")),
     price: String(args.price || "Unknown price"),
-    location: String(args.location || "Unknown location"),
+    cuisine: String(args.cuisine || "Unknown cuisine"),
+    neighborhood: String(args.neighborhood || "Unknown neighborhood"),
+    rating: Number(args.rating) || 0,
+    availableTime: String(args.availableTime || "No qualifying time shown"),
     url: candidatePage.url() || canonicalURL,
-    photoEvidence: String(args.photoEvidence || "No visual evidence recorded."),
-    shippingEvidence: String(args.shippingEvidence || "No shipping evidence recorded."),
+    vibeEvidence: String(args.vibeEvidence || "No date-night evidence recorded."),
+    availabilityEvidence: String(args.availabilityEvidence || "No qualifying availability recorded."),
+    paymentRequirement: String(args.paymentRequirement || "not shown on restaurant page"),
     reason: String(args.reason || "No reason recorded."),
   };
   await reportAction(`finished: ${verdict.title}`);
@@ -606,28 +573,48 @@ function amazonSearchURL(query: string) {
   return `https://www.amazon.com/s?k=${encodeURIComponent(query)}`;
 }
 
-function marketplaceSearchURL(query: string) {
-  return `https://www.facebook.com/marketplace/search/?query=${encodeURIComponent(query)}`;
+function pacificDateISO(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = (type: "year" | "month" | "day") =>
+    parts.find((part) => part.type === type)?.value || "";
+  return `${value("year")}-${value("month")}-${value("day")}`;
 }
 
-async function marketplaceListingLinks(searchPage: Page) {
+function openTableSearchURL() {
+  const url = new URL("https://www.opentable.com/cuisine/best-italian-restaurants-hayes-valley-ca");
+  url.searchParams.set("dateTime", `${pacificDateISO()}T18:00:00`);
+  url.searchParams.set("covers", "2");
+  return url.href;
+}
+
+async function openTableRestaurantLinks(searchPage: Page) {
+  const dateTime = `${pacificDateISO()}T18:00:00`;
   return searchPage
-    .locator('a[href*="/marketplace/item/"]')
-    .evaluateAll((anchors) => anchors.slice(0, 120).map((anchor) => {
+    .locator('a[href^="https://www.opentable.com/"], a[href^="/r/"], a[href*="-reservations-"]')
+    .evaluateAll((anchors, booking) => anchors.slice(0, 160).map((anchor) => {
       const href = new URL((anchor as HTMLAnchorElement).href);
-      const match = href.pathname.match(/\/marketplace\/item\/(\d+)/);
-      const card = anchor.closest('[role="article"], [class*="x1n2onr6"]');
+      const path = href.pathname.replace(/\/$/, "");
+      const restaurantPath = /^\/r\/[^/]+$/i.test(path) || /-reservations-[^/]+$/i.test(path);
+      href.searchParams.set("dateTime", booking.dateTime);
+      href.searchParams.set("covers", booking.covers);
+      href.hash = "";
+      const card = anchor.closest('article, [data-test*="restaurant"], li');
       return {
-        id: match?.[1] || "",
-        url: match ? `https://www.facebook.com/marketplace/item/${match[1]}/` : "",
+        id: restaurantPath ? path.toLowerCase() : "",
+        url: restaurantPath ? href.href : "",
         title: (
           anchor.getAttribute("aria-label") ||
           card?.textContent ||
           anchor.textContent ||
-          "Marketplace listing"
+          "OpenTable restaurant"
         ).trim().replace(/\s+/g, " ").slice(0, 260),
       };
-    }).filter((listing) => listing.id && listing.url));
+    }).filter((restaurant) => restaurant.id && restaurant.url), { dateTime, covers: "2" });
 }
 
 function amazonASIN(raw: string) {
@@ -696,10 +683,10 @@ export async function warmGeneral() {
   }
   warming = (async () => {
     const demo = configuration().demo;
-    const profileDirectory = `.browser-profile/${demo}`;
+    const profileDirectory = `.browser-profile/${demo === "marketplace" ? "opentable" : demo}`;
     const startURL = demo === "amazon"
       ? "https://www.amazon.com/"
-      : "https://www.facebook.com/marketplace/";
+      : openTableSearchURL();
     mkdirSync(profileDirectory, { recursive: true });
     const headless = process.env.BROWSER_HEADLESS !== "false";
     const installedChromium = join(
@@ -1325,138 +1312,222 @@ export async function executeGeneral(
     });
 
     if (page.url() !== "about:blank" && configuration().demo === "marketplace") {
-      const searchQueries = ["goose statue"];
-      {
+      send("action", {
+        label: "Searching OpenTable for Italian date-night reservations",
+        actions: ++actions,
+        status: "done",
+      });
+      const searchPage = page;
+      disclosedTabs.add(searchPage);
+      tabWork.set(searchPage, "loading");
+      await navigateWhenUsable(searchPage, openTableSearchURL(), 15_000);
+      await searchPage.locator('a[href*="opentable.com/r/"], a[href^="/r/"]')
+        .first().waitFor({ state: "attached", timeout: 6_000 }).catch(() => {});
+      tabWork.set(searchPage, "ready");
+      const candidateList = await openTableRestaurantLinks(searchPage);
+      await showWorkerProgress(searchPage, `OpenTable returned ${candidateList.length} live restaurant links`, id);
+      const inspectionURLs = [...new Set(candidateList.map((candidate) => candidate.url))].slice(0, 24);
+      const restaurantPages = new Map<string, Page>();
+      const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
+      const inspectBatch = async (urls: string[], workerOffset: number) => Promise.all(urls.map(async (url, batchIndex) => {
+        const workerIndex = workerOffset + batchIndex;
+        const requested = new URL(url);
+        let restaurantPage = existingTabs.find((candidate) => {
+          try {
+            const current = new URL(candidate.url());
+            return current.origin === requested.origin && current.pathname === requested.pathname;
+          } catch {
+            return false;
+          }
+        });
+        const reused = Boolean(restaurantPage);
+        restaurantPage ||= await generalContext!.newPage();
+        restaurantPages.set(requested.pathname, restaurantPage);
+        registerTabs(restaurantPage);
+        disclosedTabs.add(restaurantPage);
+        restaurantPage.setDefaultTimeout(5000);
+        tabWork.set(restaurantPage, reused ? "reading" : "loading");
+        try {
+          await showWorkerProgress(restaurantPage, `Restaurant worker ${workerIndex + 1}: opening`, id);
+          if (!reused) await navigateWhenUsable(restaurantPage, url, 15_000);
+          await restaurantPage.locator("body").waitFor({ state: "attached", timeout: 3500 });
+          tabWork.set(restaurantPage, "reading");
+          const workerCallNumber = ++modelCallsStarted;
+          send("inference-start", { call: workerCallNumber });
+          const verdict = await inspectOpenTableRestaurant(
+            restaurantPage,
+            signal,
+            (timing) => {
+              timings.push(timing);
+              recordSpan({ name: `OpenTable worker ${workerIndex + 1}`, category: "model", duration: timing.total });
+              send("inference", { call: workerCallNumber, timing });
+            },
+            async (label) => {
+              send("action", {
+                label: `Restaurant worker ${workerIndex + 1}: ${label}`,
+                actions: ++actions,
+                status: "done",
+              });
+              await showWorkerProgress(restaurantPage!, `Restaurant worker ${workerIndex + 1}: ${label}`, id);
+            },
+          );
+          tabWork.set(restaurantPage, verdict.status === "blocked" ? "error" : "ready");
+          return verdict;
+        } catch (error) {
+          tabWork.set(restaurantPage, "error");
+          return {
+            status: "blocked" as const,
+            title: await restaurantPage.title().catch(() => "Unknown restaurant"),
+            price: "Unknown price",
+            cuisine: "Unknown cuisine",
+            neighborhood: "Unknown neighborhood",
+            rating: 0,
+            availableTime: "No qualifying time shown",
+            url,
+            vibeEvidence: "The restaurant page could not be inspected.",
+            availabilityEvidence: "Availability could not be verified.",
+            paymentRequirement: "not verified",
+            reason: friendlyBrowserError(error instanceof Error ? error.message : "Restaurant inspection failed"),
+          };
+        }
+      }));
+
+      const inspected: CandidateVerdict[] = [];
+      for (let offset = 0; offset < inspectionURLs.length; offset += 8) {
+        const batch = inspectionURLs.slice(offset, offset + 8);
         send("action", {
-          label: "Opening Facebook Marketplace search for goose statues",
+          label: `Inspecting ${batch.length} OpenTable restaurants in parallel`,
           actions: ++actions,
           status: "done",
         });
-        const searchPages = await Promise.all(searchQueries.map(async (query, workerIndex) => {
-          const searchPage = await generalContext!.newPage();
-          registerTabs(searchPage);
-          disclosedTabs.add(searchPage);
-          searchPage.setDefaultTimeout(5000);
-          tabWork.set(searchPage, "loading");
-          try {
-            await showWorkerProgress(searchPage, `Marketplace search ${workerIndex + 1}: ${query}`, id);
-            await navigateWhenUsable(searchPage, marketplaceSearchURL(query), 15_000);
-            await searchPage.locator('a[href*="/marketplace/item/"]').first()
-              .waitFor({ state: "attached", timeout: 4500 }).catch(() => {});
-            tabWork.set(searchPage, "ready");
-            const listings = await marketplaceListingLinks(searchPage);
-            await showWorkerProgress(searchPage, `Marketplace search ${workerIndex + 1}: ${listings.length} links`, id);
-            return { query, page: searchPage, listings };
-          } catch (error) {
-            tabWork.set(searchPage, "error");
-            return {
-              query,
-              page: searchPage,
-              listings: [] as { id: string; url: string; title: string }[],
-              error: friendlyBrowserError(error instanceof Error ? error.message : "Marketplace search failed"),
-            };
-          }
-        }));
-        const candidates = new Map<string, { id: string; url: string; title: string; query: string }>();
-        for (let resultIndex = 0; resultIndex < 80 && candidates.size < 80; resultIndex++) {
-          for (const search of searchPages) {
-            const listing = search.listings[resultIndex];
-            if (!listing || candidates.has(listing.id)) continue;
-            candidates.set(listing.id, { ...listing, query: search.query });
-          }
-        }
-        const candidateList = [...candidates.values()];
-        const inspectionURLs = candidateList.map((candidate) => candidate.url);
-        send("action", {
-          label: `Opening ${Math.min(10, inspectionURLs.length)} goose-statue listing links in parallel`,
-          actions: ++actions,
-          status: "done",
-        });
-        const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
-        const inspectBatch = async (urls: string[], workerOffset: number) => Promise.all(urls.map(async (url, batchIndex) => {
-          const workerIndex = workerOffset + batchIndex;
-          const requested = new URL(url);
-          let listingPage = existingTabs.find((candidate) => {
-            try {
-              const current = new URL(candidate.url());
-              return current.origin === requested.origin && current.pathname === requested.pathname;
-            } catch {
-              return false;
-            }
-          });
-          const reused = Boolean(listingPage);
-          listingPage ||= await generalContext!.newPage();
-          registerTabs(listingPage);
-          disclosedTabs.add(listingPage);
-          listingPage.setDefaultTimeout(5000);
-          tabWork.set(listingPage, reused ? "reading" : "loading");
-          try {
-            await showWorkerProgress(listingPage, `Listing worker ${workerIndex + 1}: opening`, id);
-            if (!reused) await navigateWhenUsable(listingPage, url, 15_000);
-            await listingPage.locator("body").waitFor({ state: "attached", timeout: 3500 });
-            tabWork.set(listingPage, "reading");
-            const workerCallNumber = ++modelCallsStarted;
-            send("inference-start", { call: workerCallNumber });
-            const verdict = await inspectMarketplaceListing(
-              listingPage,
-              signal,
-              (timing) => {
-                timings.push(timing);
-                recordSpan({ name: `Marketplace vision worker ${workerIndex + 1}`, category: "model", duration: timing.total });
-                send("inference", { call: workerCallNumber, timing });
-              },
-              async (label) => {
-                send("action", {
-                  label: `Listing worker ${workerIndex + 1}: ${label}`,
-                  actions: ++actions,
-                  status: "done",
-                });
-                await showWorkerProgress(listingPage!, `Listing worker ${workerIndex + 1}: ${label}`, id);
-              },
-            );
-            tabWork.set(listingPage, verdict.status === "blocked" ? "error" : "ready");
-            return verdict;
-          } catch (error) {
-            tabWork.set(listingPage, "error");
-            return {
-              status: "blocked" as const,
-              title: await listingPage.title().catch(() => "Unknown listing"),
-              price: "Unknown price",
-              location: "Unknown location",
-              url,
-              photoEvidence: "The first photo could not be inspected.",
-              shippingEvidence: "Shipping could not be verified.",
-              reason: friendlyBrowserError(error instanceof Error ? error.message : "Listing inspection failed"),
-            };
-          }
-        }));
-        const inspected = await inspectBatch(inspectionURLs.slice(0, 10), 0);
-        let matches = inspected.filter((candidate) => candidate.status === "match");
-        for (let offset = 10; matches.length < 2 && offset < inspectionURLs.length; offset += 10) {
-          const retryURLs = inspectionURLs.slice(offset, offset + 10);
-          send("action", {
-            label: `${matches.length} verified matches; checking ${retryURLs.length} more listings in parallel`,
-            actions: ++actions,
-            status: "done",
-          });
-          const retryVerdicts = await inspectBatch(retryURLs, offset);
-          inspected.push(...retryVerdicts);
-          matches = inspected.filter((candidate) => candidate.status === "match");
-        }
-        matches = matches.slice(0, 2);
-        const verifiedResult = matches.length
-          ? `Verified Marketplace matches after inspecting ${inspected.length} of ${inspectionURLs.length} distinct live candidate listings: ${JSON.stringify(matches)}`
-          : `No qualifying listing was verified after exhausting all ${inspectionURLs.length} distinct live candidate listings. Inspected results: ${JSON.stringify(inspected)}`;
-        const finalAnswer = await runCoordinationCall(
-          "Marketplace final-answer inference",
-          "You are the final response stage of a Facebook Marketplace research agent. Using only the supplied worker verdicts, return a concise numbered list of up to two verified matches. Each match must include its clickable canonical URL, title, price, location, first-photo open-beak evidence, and Sunnyvale-shipping evidence. If fewer than two were verified, say only that this run verified fewer than two from its live candidate pool; never claim that no other qualifying listing exists on Marketplace. Never invent facts, contact sellers, make offers, or expose private details.",
-          verifiedResult,
-          700,
-        );
-        summary = finalAnswer || (matches.length
-          ? matches.map((match, index) => `${index + 1}. [${match.title}](${match.url}) — ${match.price}. ${match.photoEvidence} ${match.shippingEvidence}`).join("\n")
-          : "No listing satisfied both the first-photo open-beak requirement and verified shipping requirement.");
+        inspected.push(...await inspectBatch(batch, offset));
+        if (inspected.some((candidate) => candidate.status === "match")) break;
       }
+
+      const targetMinutes = 18 * 60;
+      const timeDistance = (value: string) => {
+        const match = value.match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+        if (!match) return Number.POSITIVE_INFINITY;
+        let hour = Number(match[1]) % 12;
+        if (match[3].toUpperCase() === "PM") hour += 12;
+        return Math.abs(hour * 60 + Number(match[2] || 0) - targetMinutes);
+      };
+      const matches = inspected
+        .filter((candidate) => candidate.status === "match")
+        .sort((left, right) => timeDistance(left.availableTime) - timeDistance(right.availableTime) || right.rating - left.rating);
+
+      type BookingResult = {
+        status: "confirmed" | "manual_action" | "disqualified" | "failed";
+        restaurant: CandidateVerdict;
+        detail: string;
+        confirmation?: string;
+      };
+      const attemptBooking = async (restaurant: CandidateVerdict): Promise<BookingResult> => {
+        const restaurantURL = new URL(restaurant.url);
+        const bookingPage = restaurantPages.get(restaurantURL.pathname);
+        if (!bookingPage || bookingPage.isClosed())
+          return { status: "failed", restaurant, detail: "The verified restaurant tab was no longer available." };
+        page = bookingPage;
+        generalPage = bookingPage;
+        await bookingPage.bringToFront();
+        await capturePage(bookingPage, `Selecting ${restaurant.availableTime} at ${restaurant.title}`, id);
+        const requestedTimes = [...new Set([restaurant.availableTime, "6:00 PM", "5:45 PM", "6:15 PM", "5:30 PM", "6:30 PM"])]
+          .filter((value) => timeDistance(value) <= 30);
+        let selectedTime = "";
+        for (const time of requestedTimes) {
+          const timePattern = new RegExp(time.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+          const control = bookingPage.getByRole("button", { name: timePattern }).first();
+          const link = bookingPage.getByRole("link", { name: timePattern }).first();
+          const target = await control.isVisible().catch(() => false) ? control : link;
+          if (!await target.isVisible().catch(() => false)) continue;
+          await target.click();
+          selectedTime = time;
+          await bookingPage.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => {});
+          await bookingPage.waitForTimeout(500);
+          break;
+        }
+        if (!selectedTime)
+          return { status: "failed", restaurant, detail: "The qualifying time disappeared before it could be selected." };
+
+        let submitted = false;
+        let progressed = false;
+        for (let step = 0; step < 8; step += 1) {
+          signal.throwIfAborted();
+          const bodyText = await bookingPage.locator("body").innerText().catch(() => "");
+          const normalized = bodyText.replace(/\s+/g, " ");
+          if (/reservation (?:is )?confirmed|booking confirmed|you(?:'|’)re booked|thanks for booking/i.test(normalized) || /(?:confirmation|booking-confirmed|reservation-confirmed)/i.test(bookingPage.url())) {
+            const confirmation = normalized.match(/(?:confirmation|reservation)(?: number| code| #)?\s*[:#]?\s*([A-Z0-9-]{5,})/i)?.[1];
+            return { status: "confirmed", restaurant, detail: `Reservation confirmed for two at ${selectedTime}.`, confirmation };
+          }
+          if (/credit card required|card (?:is )?required|provide (?:a|your) (?:credit )?card|deposit required|pre-?pay(?:ment|paid)?|non-refundable|purchase (?:this )?(?:experience|package)|\$\d+(?:\.\d{2})?\s*(?:per person|deposit)/i.test(normalized))
+            return { status: "disqualified", restaurant, detail: "OpenTable exposed a card, deposit, package, or prepayment requirement." };
+          if (/captcha|verify (?:that )?you(?:'|’)re human|sign in to continue|one[- ]time (?:code|password)|passkey|verification code/i.test(normalized))
+            return { status: "manual_action", restaurant, detail: "OpenTable requires login or identity verification before the reservation can continue." };
+          const emptyRequired = await bookingPage.locator('main input:visible, [role="dialog"] input:visible, form input:visible, main textarea:visible, [role="dialog"] textarea:visible, form textarea:visible').evaluateAll((fields) => fields.some((field) => {
+            const input = field as HTMLInputElement;
+            const descriptor = [input.name, input.id, input.type, input.autocomplete, input.placeholder, input.getAttribute("aria-label")].join(" ");
+            const context = (input.closest('form, [role="dialog"]')?.textContent || "").slice(0, 1000);
+            return !input.disabled && !input.readOnly && !input.value.trim() &&
+              /name|email|e-mail|phone|mobile|tel/i.test(descriptor) &&
+              !/newsletter|subscribe|marketing emails/i.test(context);
+          })).catch(() => false);
+          if (emptyRequired)
+            return { status: "manual_action", restaurant, detail: "OpenTable needs missing contact details completed manually; the agent did not enter personal information." };
+          if (submitted) {
+            await bookingPage.waitForTimeout(1_000);
+            continue;
+          }
+          const safeControl = bookingPage.getByRole("button", { name: /^(?:continue|reserve|complete reservation|complete booking|confirm|confirm reservation|book)$/i }).filter({ hasNotText: /\$|prepaid|package|experience/i }).first();
+          if (!await safeControl.isVisible().catch(() => false)) {
+            const safeSeating = bookingPage.getByRole("button", { name: /^(?:standard|indoor|main dining room)$/i }).first();
+            if (await safeSeating.isVisible().catch(() => false)) {
+              await safeSeating.click();
+              progressed = true;
+              await bookingPage.waitForTimeout(400);
+              continue;
+            }
+            if (progressed && step < 6) {
+              await bookingPage.waitForTimeout(1_000);
+              continue;
+            }
+            return { status: "manual_action", restaurant, detail: "OpenTable reached a reservation step without a recognized safe continuation control; manual review is required." };
+          }
+          const label = (await safeControl.innerText().catch(() => "Continue")).trim();
+          const finalControl = /complete reservation|complete booking|confirm(?: reservation)?/i.test(label);
+          if (finalControl && !/(?:party of|table for|guests?|people|diners?)\s*2|2\s*(?:guests?|people|diners?)/i.test(normalized))
+            return { status: "manual_action", restaurant, detail: "The final review did not visibly confirm a party of two, so the reservation was not submitted." };
+          submitted = finalControl;
+          progressed = true;
+          await safeControl.click();
+          await bookingPage.waitForLoadState("domcontentloaded", { timeout: 8_000 }).catch(() => {});
+          await bookingPage.waitForTimeout(500);
+        }
+        return { status: submitted ? "manual_action" : "failed", restaurant, detail: submitted
+          ? "OpenTable is still processing the single reservation submission; the agent did not submit it again."
+          : "The reservation flow did not reach confirmation." };
+      };
+
+      let booking: BookingResult | undefined;
+      for (const match of matches) {
+        send("action", { label: `Trying the best qualifying time at ${match.title}`, actions: ++actions, status: "done" });
+        const result = await attemptBooking(match);
+        booking = result;
+        if (result.status !== "disqualified" && result.status !== "failed") break;
+      }
+      const evidence = JSON.stringify({
+        request: "Dinner tonight for two near 6:00 PM; cute romantic Italian; Hayes Valley; about $30–$50/person; no card, deposit, package, or prepayment.",
+        inspected,
+        booking,
+      });
+      const finalAnswer = await runCoordinationCall(
+        "OpenTable final-answer inference",
+        "You are the final response stage of an OpenTable reservation agent. Use only the supplied live evidence. State the selected restaurant, clickable URL, rating, price tier, reservation time, party size, date-night evidence, and exact booking outcome. If confirmed, include the confirmation identifier only when supplied. If manual action is needed, explain exactly what the user must do on the page left open. If no reservation was made, say so plainly. Never invent facts or expose personal details.",
+        evidence,
+        700,
+      );
+      summary = finalAnswer || (booking
+        ? `[${booking.restaurant.title}](${booking.restaurant.url}) — ${booking.detail}`
+        : `No qualifying OpenTable reservation was verified from ${inspected.length} live restaurant pages, so nothing was booked.`);
     } else if (configuration().demo === "amazon") {
       send("action", {
         label: `Asking ${providerLabel} how to search Amazon`,
@@ -1792,19 +1863,19 @@ export async function executeGeneral(
                 } else if (call.name === "open_listing_tabs") {
                   const supplied = args.urls;
                   if (!Array.isArray(supplied) || supplied.length < 2 || supplied.length > 10)
-                    throw new Error("Choose 2–10 Marketplace listing URLs.");
+                    throw new Error("Choose 2–10 OpenTable restaurant URLs.");
                   const urls = [...new Set(supplied.map((raw) => {
                     const url = new URL(safePublicURL(String(raw)));
                     if (
-                      !/(^|\.)facebook\.com$/i.test(url.hostname) ||
-                      !url.pathname.startsWith("/marketplace/item/")
+                      !/(^|\.)opentable\.com$/i.test(url.hostname) ||
+                      !(/^\/r\/[^/]+\/?$/i.test(url.pathname) || /-reservations-[^/]+\/?$/i.test(url.pathname))
                     )
-                      throw new Error("Only Facebook Marketplace listing URLs can be preloaded.");
+                      throw new Error("Only OpenTable restaurant URLs can be inspected.");
                     url.hash = "";
                     return url.href;
                   }))];
                   if (urls.length < 2)
-                    throw new Error("Choose at least two unique Marketplace listings.");
+                    throw new Error("Choose at least two unique OpenTable restaurants.");
                   const existingTabs = generalContext!.pages().filter((tab) => !tab.isClosed());
                   const loaded = await Promise.all(urls.map(async (url, workerIndex) => {
                     const requested = new URL(url);
@@ -1827,9 +1898,9 @@ export async function executeGeneral(
                         await navigateWhenUsable(tab, url);
                       await tab.locator("body").waitFor({ state: "attached", timeout: 3000 });
                       tabWork.set(tab, "reading");
-                      const workerTitle = (await tab.title().catch(() => "Marketplace listing")).slice(0, 70);
+                      const workerTitle = (await tab.title().catch(() => "OpenTable restaurant")).slice(0, 70);
                       await showWorkerProgress(tab, `Worker ${workerIndex + 1} loaded: ${workerTitle}`, call.id);
-                      const verdict = await inspectMarketplaceListing(
+                      const verdict = await inspectOpenTableRestaurant(
                         tab,
                         signal,
                         (timing) => {
@@ -1855,16 +1926,16 @@ export async function executeGeneral(
                       return {
                         url,
                         reused,
-                        error: error instanceof Error ? friendlyBrowserError(error.message) : "Listing failed to load.",
+                        error: error instanceof Error ? friendlyBrowserError(error.message) : "Restaurant failed to load.",
                       };
                     }
                   }));
                   value = {
                     candidates: loaded,
                     matchCount: loaded.filter((candidate) => "status" in candidate && candidate.status === "match").length,
-                    next: "The candidates were fully processed by parallel vision workers. If at least two matched, immediately call finish with the best two; do not inspect them again serially.",
+                    next: "The restaurants were fully processed by parallel workers. Rank exact or nearest-to-6:00 availability first, then rating; do not inspect them again serially.",
                   };
-                  await capture(`Processed ${urls.length} listing tabs in parallel`, call.id);
+                  await capture(`Processed ${urls.length} restaurant tabs in parallel`, call.id);
                 } else if (call.name === "navigate") {
                   const url = safePublicURL(
                     String(args.url),
@@ -1874,9 +1945,9 @@ export async function executeGeneral(
                   const demo = configuration().demo;
                   if (
                     (demo === "amazon" && !/(^|\.)amazon\.com$/i.test(target.hostname)) ||
-                    (demo === "marketplace" && !/(^|\.)facebook\.com$/i.test(target.hostname))
+                    (demo === "marketplace" && !/(^|\.)opentable\.com$/i.test(target.hostname))
                   )
-                    throw new Error(`This run is restricted to ${demo === "amazon" ? "Amazon.com" : "Facebook Marketplace"}.`);
+                    throw new Error(`This run is restricted to ${demo === "amazon" ? "Amazon.com" : "OpenTable"}.`);
                   await navigateWhenUsable(page!, url);
                   value = await read();
                   await capture(`Opened ${new URL(url).hostname}`, call.id);
@@ -2255,7 +2326,7 @@ async function resetBrowserView() {
   viewedPage = undefined;generalPage = page;
   await page.route("**/*", routeGeneralResource);
   const demo = configuration().demo;
-  const startURL = demo === "amazon" ? "https://www.amazon.com/" : "https://www.facebook.com/marketplace/";
+  const startURL = demo === "amazon" ? "https://www.amazon.com/" : openTableSearchURL();
   if(!page.url().startsWith(startURL)) await navigateWhenUsable(page,startURL);
 }
 export async function resetGeneralBrowser() {

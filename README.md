@@ -1,10 +1,6 @@
-# Cerebras Marketplace and Amazon Demos
+# Cerebras OpenTable and Amazon Demos
 
-A local React + Playwright browser-agent harness with separate Facebook Marketplace research and Amazon cart-preparation modes. Both run in the Cerebras interface, with the live browser occupying 75% of the workspace and Cerebras chat occupying 25%.
-
-The hidden Marketplace brief asks the model to inspect every photo for plausible goose-statue listings, verify a pixel-visible open beak, verify shipping to Sunnyvale, CA 94085, and stop immediately after two qualified listings. The visible composer is intentionally blank and accepts the presenter’s natural-language request.
-
-The agent cannot message sellers, make offers, save listings, enter credentials, or purchase anything. Those controls are blocked in code as well as in the model instructions.
+A local React + Playwright browser-agent harness with OpenTable reservation and Amazon shopping modes. Both retain the Cerebras interface, with the live browser occupying 75% of the workspace and Cerebras chat occupying 25%.
 
 ## Setup
 
@@ -13,57 +9,41 @@ npm ci
 npm run build
 ```
 
-Copy `.env.example` to `.env`, add the provider keys, and keep `.env` private. Browser cookies are stored under the ignored `.browser-profile/marketplace` directory, so a Facebook login can persist across runs.
+Copy `.env.example` to `.env`, add the provider keys, and keep `.env` private. OpenTable cookies are stored under the ignored `.browser-profile/opentable` directory; Amazon uses `.browser-profile/amazon`.
 
-## Launch with Cerebras
+## OpenTable date-night demo
 
-```bash
-npm run marketplace:cerebras
-```
-
-## Launch with Fireworks
+Launch with Cerebras:
 
 ```bash
-npm run marketplace:fireworks
+npm run opentable:cerebras
 ```
+
+The legacy `npm run marketplace:cerebras` command remains as an alias so existing demo scripts continue to work. A Fireworks launcher is also available as `npm run opentable:fireworks`.
+
+Use this prompt:
+
+```text
+Use OpenTable to find and book a dinner reservation for 2 people tonight at 6:00 PM at a cute, date-night Italian restaurant in Hayes Valley, San Francisco. Budget ~$30–$50/person; Italian; cute/romantic; Hayes Valley; available around 6:00; no card/deposit/prepayment; closest within 30 min; prioritize well-rated.
+```
+
+The harness opens the live Hayes Valley Italian search, gathers restaurant links from that page, and fans them out in batches of eight. Each visible restaurant tab gets an independent Cerebras call that verifies cuisine, neighborhood, price tier, date-night evidence, rating, and live availability. The coordinator ranks exact or nearest-to-6:00 times first and rating second.
+
+The booking stage rejects any flow that requires a card, deposit, prepayment, paid package, or prepaid experience. It can use already-present session details, but it never enters credentials, contact information, card data, or verification codes. It stops on the exact page if login, CAPTCHA, identity verification, or missing contact details require manual action. A final submission is made at most once and is not repeated while confirmation is pending.
 
 ## Amazon shopping demo
 
-The Amazon mode uses a separate ignored persistent profile at `.browser-profile/amazon`, so Amazon and Facebook sessions do not mix. Cerebras searches, adds selected products to the cart, verifies the live cart, and returns product links, prices, quantities, and the visible subtotal. Optional demo-specific constraints belong in the ignored `AMAZON_EPHEMERAL_BRIEF` value and are appended to the model instructions at runtime without being returned to the browser UI.
-
-Real ordering is disabled by default. A specifically authorized local session may set `AMAZON_PURCHASE_AUTHORIZED=true` only in its ignored `.env`. In that mode, after verifying the exact cart and final review, Cerebras may submit the order using an already-saved payment method and a saved address matching the private destination. It still cannot type credentials, address data, or payment data, and it stops for login, CAPTCHA, OTP, missing/mismatched checkout details, price violations, or an ambiguous final state. The confirmation response omits private address and payment information.
-
-Amazon product research is parallelized: after one search exposes candidate links, Cerebras opens 5–10 product tabs and gives every tab an independent one-shot Qwen vision worker. Eligible products are returned to the coordinator together, and the five selected Add-to-Cart actions run concurrently before one live cart-verification pass. Worker tabs appear immediately and rotate through the embedded preview as they load, capture, finish, and add products.
-
-Launch with Cerebras:
+The Amazon mode searches, inspects product tabs concurrently, adds selected products, verifies the live cart, and returns product links, prices, quantities, and the subtotal. Real ordering remains disabled unless the ignored local environment explicitly sets `AMAZON_PURCHASE_AUTHORIZED=true`.
 
 ```bash
 npm run amazon:cerebras
 ```
 
-Launch with Fireworks:
+## Browser presentation
 
-```bash
-npm run amazon:fireworks
-```
+The launcher opens the Cerebras controller at [http://localhost:3100](http://localhost:3100). The browser is embedded in the 75%-width side by default. To explicitly request a separate native window, run with `BROWSER_VIEW=native`.
 
-The launcher opens the Cerebras controller at [http://localhost:3100](http://localhost:3100) automatically. Before submitting the demo prompt, use the interactive embedded browser to log into the active shopping site if needed. The browser does not initiate a run by itself: type the request in Cerebras and press **Run**. Do not run two demo commands at once; they share port 3100 but use separate persistent browser profiles.
-
-The browser is embedded in the 75%-width side of the Cerebras interface by default. It runs headlessly at the process level but remains visible and interactive in Cerebras. The launcher deliberately ignores a stale `BROWSER_HEADLESS=false` exported by an earlier shell command. To explicitly request a separate native window, run with `BROWSER_VIEW=native`.
-
-## Demo prompt
-
-```text
-My friend Qi is an avid collector of statues of geese. Look for all geese statues on facebook marketplace that can ship to sunnyvale, and give me the top options with geese with their mouths open
-```
-
-The fixed brief behind the composer narrows the output to two verified matches and requires the final answer to include clickable listing links, prices, locations, photo evidence, and shipping evidence.
-
-After Cerebras collects plausible search-result links, it fans out up to ten independent Qwen workers concurrently. Each worker owns one Facebook Marketplace tab in the shared logged-in context, evaluates only the first listing screenshot, verifies open-beak pixels and Sunnyvale shipping, and returns a structured verdict with a single vision call. This deliberately trades gallery coverage for minimum demo latency. The parent coordinator gathers every verdict and always calls the final-answer tool with the best two matches or an explicit blocker result.
-
-Worker tabs appear in the Cerebras tab strip as soon as they are created. While processing continues concurrently, the embedded browser rotates through individual worker tabs as their first photos are captured and judged; the status line identifies the worker currently on screen. The always-visible elapsed-time counter is omitted from the presentation UI.
-
-The submitted request remains pinned at the top of the assistant panel throughout processing and after the final answer, so the demo audience can always see the task the workers are executing.
+Do not run two demo commands at once; they share port 3100. The submitted request remains pinned at the top of the assistant panel while the worker tabs run.
 
 ## Verification
 
@@ -71,5 +51,3 @@ The submitted request remains pinned at the top of the assistant panel throughou
 npm run build
 npm test
 ```
-
-The Cerebras and Fireworks launchers share the same UI, browser profile, tool policy, vision screenshots, and stopping rule; only the inference provider changes.

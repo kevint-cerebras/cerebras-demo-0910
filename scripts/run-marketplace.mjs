@@ -3,13 +3,14 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 const provider = process.argv[2];
-const demo = process.argv[3] || 'marketplace';
+const requestedDemo = process.argv[3] || 'opentable';
+const demo = requestedDemo === 'opentable' ? 'marketplace' : requestedDemo;
 if (!['cerebras', 'fireworks'].includes(provider)) {
-  console.error('Usage: node scripts/run-marketplace.mjs cerebras|fireworks [marketplace|amazon]');
+  console.error('Usage: node scripts/run-marketplace.mjs cerebras|fireworks [opentable|amazon]');
   process.exit(2);
 }
-if (!['marketplace', 'amazon'].includes(demo)) {
-  console.error('Demo must be marketplace or amazon.');
+if (!['opentable', 'marketplace', 'amazon'].includes(requestedDemo)) {
+  console.error('Demo must be opentable or amazon.');
   process.exit(2);
 }
 
