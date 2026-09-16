@@ -66,18 +66,28 @@ function isPlaywrightTimeout(error: unknown) {
 
 async function navigateWhenUsable(page: Page, url: string, timeout = 12_000) {
   const previousURL = page.url();
-  try {
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout });
-  } catch (error) {
-    // Amazon frequently keeps ad/service-worker requests alive past Playwright's
-    // navigation deadline even though the document is already usable.
-    const usable =
-      isPlaywrightTimeout(error) &&
-      page.url() !== "about:blank" &&
-      (page.url() !== previousURL || previousURL === url) &&
-      (await page.locator("body").count().catch(() => 0)) > 0;
-    if (!usable) throw error;
-    await page.evaluate(() => window.stop()).catch(() => {});
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+      return;
+    } catch (error) {
+      // Amazon frequently keeps ad/service-worker requests alive past Playwright's
+      // navigation deadline even though the document is already usable.
+      const usable =
+        isPlaywrightTimeout(error) &&
+        page.url() !== "about:blank" &&
+        (page.url() !== previousURL || previousURL === url) &&
+        (await page.locator("body").count().catch(() => 0)) > 0;
+      if (usable) {
+        await page.evaluate(() => window.stop()).catch(() => {});
+        return;
+      }
+      const retryableTransportError =
+        error instanceof Error && /ERR_(?:HTTP2|QUIC)_PROTOCOL_ERROR/i.test(error.message);
+      if (!retryableTransportError || attempt === 2) throw error;
+      await page.goto("about:blank", { waitUntil: "commit", timeout: 3_000 }).catch(() => {});
+      await page.waitForTimeout(250 * (attempt + 1));
+    }
   }
 }
 
@@ -712,6 +722,7 @@ export async function warmGeneral() {
           "--window-size=1300,980",
           "--disable-crash-reporter",
           "--disable-crashpad",
+          ...(demo === "marketplace" ? ["--disable-http2", "--disable-quic"] : []),
         ],
       },
     );
@@ -724,7 +735,14 @@ export async function warmGeneral() {
       p.setDefaultTimeout(4000);
     });
     generalPage.setDefaultTimeout(4000);
-    await navigateWhenUsable(generalPage, startURL);
+    try {
+      await navigateWhenUsable(generalPage, startURL);
+    } catch (error) {
+      await context.close().catch(() => {});
+      generalContext = undefined;
+      generalPage = undefined;
+      throw error;
+    }
     return generalPage;
   })();
   try {
