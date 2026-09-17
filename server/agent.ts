@@ -68,7 +68,7 @@ async function navigateWhenUsable(page: Page, url: string, timeout = 12_000) {
   const previousURL = page.url();
   const openTableNavigation = (() => {
     try {
-      return /(^|\.)opentable\.com$/i.test(new URL(url).hostname);
+      return /(^|\.)opentable\.(?:com|ca)$/i.test(new URL(url).hostname);
     } catch {
       return false;
     }
@@ -612,7 +612,11 @@ function pacificDateISO(date = new Date()) {
 }
 
 function openTableSearchURL() {
-  const url = new URL("https://www.opentable.com/cuisine/best-italian-restaurants-hayes-valley-ca");
+  // The user's inspected network currently returns a Cloudflare/Akamai 503 for
+  // the US discovery route while OpenTable's Canadian frontend serves the same
+  // San Francisco inventory normally. Restaurant and booking URLs remain on an
+  // official OpenTable domain throughout.
+  const url = new URL("https://www.opentable.ca/cuisine/best-italian-restaurants-hayes-valley-ca");
   url.searchParams.set("dateTime", `${pacificDateISO()}T18:00:00`);
   url.searchParams.set("covers", "2");
   return url.href;
@@ -621,7 +625,7 @@ function openTableSearchURL() {
 async function openTableRestaurantLinks(searchPage: Page) {
   const dateTime = `${pacificDateISO()}T18:00:00`;
   return searchPage
-    .locator('a[href^="https://www.opentable.com/"], a[href^="/r/"], a[href*="-reservations-"]')
+    .locator('a[href^="https://www.opentable.com/"], a[href^="https://www.opentable.ca/"], a[href^="/r/"], a[href*="-reservations-"]')
     .evaluateAll((anchors, booking) => anchors.slice(0, 160).map((anchor) => {
       const href = new URL((anchor as HTMLAnchorElement).href);
       const path = href.pathname.replace(/\/$/, "");
@@ -1358,7 +1362,7 @@ export async function executeGeneral(
       disclosedTabs.add(searchPage);
       tabWork.set(searchPage, "loading");
       await navigateWhenUsable(searchPage, openTableSearchURL(), 15_000);
-      await searchPage.locator('a[href*="opentable.com/r/"], a[href^="/r/"]')
+      await searchPage.locator('a[href*="opentable.com/r/"], a[href*="opentable.ca/r/"], a[href^="/r/"]')
         .first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
       tabWork.set(searchPage, "ready");
       const candidateList = await openTableRestaurantLinks(searchPage);
@@ -1904,7 +1908,7 @@ export async function executeGeneral(
                   const urls = [...new Set(supplied.map((raw) => {
                     const url = new URL(safePublicURL(String(raw)));
                     if (
-                      !/(^|\.)opentable\.com$/i.test(url.hostname) ||
+                      !/(^|\.)opentable\.(?:com|ca)$/i.test(url.hostname) ||
                       !(/^\/r\/[^/]+\/?$/i.test(url.pathname) || /-reservations-[^/]+\/?$/i.test(url.pathname))
                     )
                       throw new Error("Only OpenTable restaurant URLs can be inspected.");
@@ -1982,7 +1986,7 @@ export async function executeGeneral(
                   const demo = configuration().demo;
                   if (
                     (demo === "amazon" && !/(^|\.)amazon\.com$/i.test(target.hostname)) ||
-                    (demo === "marketplace" && !/(^|\.)opentable\.com$/i.test(target.hostname))
+                    (demo === "marketplace" && !/(^|\.)opentable\.(?:com|ca)$/i.test(target.hostname))
                   )
                     throw new Error(`This run is restricted to ${demo === "amazon" ? "Amazon.com" : "OpenTable"}.`);
                   await navigateWhenUsable(page!, url);
