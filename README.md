@@ -9,7 +9,7 @@ npm ci
 npm run build
 ```
 
-Copy `.env.example` to `.env`, add the provider keys, and keep `.env` private. OpenTable cookies are stored under the ignored `.browser-profile/opentable` directory; Amazon uses `.browser-profile/amazon`.
+Copy `.env.example` to `.env`, add the provider keys, and keep `.env` private. OpenTable cookies are stored under the ignored `.browser-profile/opentable-chrome` directory; Amazon uses `.browser-profile/amazon`.
 
 ## OpenTable date-night demo
 

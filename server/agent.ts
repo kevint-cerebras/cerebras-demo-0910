@@ -709,7 +709,7 @@ export async function warmGeneral() {
   }
   warming = (async () => {
     const demo = configuration().demo;
-    const profileDirectory = `.browser-profile/${demo === "marketplace" ? "opentable" : demo}`;
+    const profileDirectory = `.browser-profile/${demo === "marketplace" ? "opentable-chrome" : demo}`;
     const startURL = demo === "amazon"
       ? "https://www.amazon.com/"
       : openTableSearchURL();
@@ -723,7 +723,7 @@ export async function warmGeneral() {
     );
     const executablePath =
       process.env.BROWSER_EXECUTABLE_PATH ||
-      (existsSync(installedChromium) ? installedChromium : undefined);
+      (demo === "amazon" && existsSync(installedChromium) ? installedChromium : undefined);
     const context = await chromium.launchPersistentContext(
       profileDirectory,
       {
@@ -731,6 +731,7 @@ export async function warmGeneral() {
           ? { executablePath }
           : { channel: process.env.BROWSER_CHANNEL || "chrome" }),
         headless,
+        ignoreHTTPSErrors: demo === "marketplace",
         viewport: { width: 1280, height: 850 },
         reducedMotion: "reduce",
         serviceWorkers: "allow",
@@ -738,13 +739,15 @@ export async function warmGeneral() {
           "--window-size=1300,980",
           "--disable-crash-reporter",
           "--disable-crashpad",
-          ...(demo === "marketplace" ? ["--disable-http2", "--disable-quic"] : []),
         ],
       },
     );
     generalContext = context;
     await context.addInitScript({ content: nativeCursorScript });
-    await context.route("**/*", routeGeneralResource);
+    // OpenTable relies heavily on service workers and streamed application
+    // resources. Intercepting every request can stall its initial document, so
+    // keep resource filtering only for the Amazon optimization path.
+    if (demo === "amazon") await context.route("**/*", routeGeneralResource);
     generalPage = context.pages()[0] || (await context.newPage());
     context.on("page", (p) => {
       generalPage = p;
@@ -2358,8 +2361,8 @@ async function resetBrowserView() {
   disclosedTabs.clear();
   amazonWarming = undefined;
   viewedPage = undefined;generalPage = page;
-  await page.route("**/*", routeGeneralResource);
   const demo = configuration().demo;
+  if (demo === "amazon") await page.route("**/*", routeGeneralResource);
   const startURL = demo === "amazon" ? "https://www.amazon.com/" : openTableSearchURL();
   if(!page.url().startsWith(startURL)) await navigateWhenUsable(page,startURL);
 }
