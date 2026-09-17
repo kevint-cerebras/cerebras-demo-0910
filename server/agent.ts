@@ -66,9 +66,25 @@ function isPlaywrightTimeout(error: unknown) {
 
 async function navigateWhenUsable(page: Page, url: string, timeout = 12_000) {
   const previousURL = page.url();
+  const openTableNavigation = (() => {
+    try {
+      return /(^|\.)opentable\.com$/i.test(new URL(url).hostname);
+    } catch {
+      return false;
+    }
+  })();
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout });
+      await page.goto(url, {
+        // OpenTable continuously loads third-party application resources and can
+        // miss DOMContentLoaded even after the main document is usable. Commit
+        // is the correct warmup boundary; callers wait for their own live DOM.
+        waitUntil: openTableNavigation ? "commit" : "domcontentloaded",
+        timeout: openTableNavigation ? Math.max(timeout, 20_000) : timeout,
+      });
+      if (openTableNavigation) {
+        await page.locator("body").waitFor({ state: "attached", timeout: 8_000 }).catch(() => {});
+      }
       return;
     } catch (error) {
       // Amazon frequently keeps ad/service-worker requests alive past Playwright's
@@ -1340,7 +1356,7 @@ export async function executeGeneral(
       tabWork.set(searchPage, "loading");
       await navigateWhenUsable(searchPage, openTableSearchURL(), 15_000);
       await searchPage.locator('a[href*="opentable.com/r/"], a[href^="/r/"]')
-        .first().waitFor({ state: "attached", timeout: 6_000 }).catch(() => {});
+        .first().waitFor({ state: "attached", timeout: 15_000 }).catch(() => {});
       tabWork.set(searchPage, "ready");
       const candidateList = await openTableRestaurantLinks(searchPage);
       await showWorkerProgress(searchPage, `OpenTable returned ${candidateList.length} live restaurant links`, id);
